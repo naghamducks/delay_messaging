@@ -1,27 +1,50 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
 import '../services/bluetooth_service.dart';
 
 /// Dialog to check and prompt for Bluetooth enablement
 class BluetoothCheckDialog {
   static final BluetoothService _bluetoothService = BluetoothService();
 
+  /// Opens Bluetooth settings directly on Android, or general settings on iOS
+  static Future<void> _openBluetoothSettings() async {
+    if (Platform.isAndroid) {
+      const intent = AndroidIntent(
+        action: 'android.settings.BLUETOOTH_SETTINGS',
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      );
+      await intent.launch();
+    } else {
+      await openAppSettings();
+    }
+  }
+
   /// Show Bluetooth status check dialog
   static Future<void> show(BuildContext context) async {
     // Check permissions first
     final hasPermissions = await _bluetoothService.hasBluetoothPermissions();
-    
+    print('Bluetooth permissions granted: $hasPermissions');
+
     if (!hasPermissions) {
+      print('Showing permission dialog');
       _showPermissionDialog(context);
       return;
     }
 
     // Check if Bluetooth is enabled
     final isEnabled = await _bluetoothService.isBluetoothEnabled();
+    print('Bluetooth enabled: $isEnabled');
 
     if (!isEnabled) {
-      _showBluetoothOffDialog(context);
+      print('Showing Bluetooth settings dialog');
+      _showBluetoothSettingsDialog(context);
+    } else {
+      print('All good - no dialog needed');
     }
+    // If permissions are granted and Bluetooth is enabled, do nothing
   }
 
   /// Show dialog when Bluetooth permissions are not granted
@@ -42,20 +65,24 @@ class BluetoothCheckDialog {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () async {
+              Navigator.pop(context);
+              // Show warning when user cancels
+              _showPermissionWarningDialog(context);
+            },
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () async {
               Navigator.pop(context);
               final granted = await _bluetoothService.requestBluetoothPermissions();
-              
+
               if (granted) {
                 // Check Bluetooth status after permissions granted
                 show(context);
               } else {
-                // Show settings dialog if permissions denied
-                _showOpenSettingsDialog(context);
+                // Show warning dialog before going to settings
+                _showPermissionWarningDialog(context);
               }
             },
             child: const Text('Grant Permissions'),
@@ -66,7 +93,7 @@ class BluetoothCheckDialog {
   }
 
   /// Show dialog when Bluetooth is turned off
-  static void _showBluetoothOffDialog(BuildContext context) {
+  static void _showBluetoothSettingsDialog(BuildContext context) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -79,7 +106,7 @@ class BluetoothCheckDialog {
         title: const Text('Bluetooth is Off'),
         content: const Text(
           'DTN Messenger requires Bluetooth to discover and communicate with nearby devices.\n\n'
-          'Please enable Bluetooth to continue.',
+          'Please enable Bluetooth in your device settings.',
         ),
         actions: [
           TextButton(
@@ -88,26 +115,11 @@ class BluetoothCheckDialog {
           ),
           FilledButton(
             onPressed: () async {
-              try {
-                await _bluetoothService.requestEnableBluetooth();
-                Navigator.pop(context);
-                
-                // Wait a moment for Bluetooth to turn on
-                await Future.delayed(const Duration(seconds: 1));
-                
-                // Verify it's on
-                final isNowEnabled = await _bluetoothService.isBluetoothEnabled();
-                if (!isNowEnabled) {
-                  // If still not enabled, show settings option
-                  _showOpenSettingsDialog(context);
-                }
-              } catch (e) {
-                // If automatic enable fails, show settings
-                Navigator.pop(context);
-                _showOpenSettingsDialog(context);
-              }
+              Navigator.pop(context);
+              // Open Bluetooth settings directly
+              await _openBluetoothSettings();
             },
-            child: const Text('Enable Bluetooth'),
+            child: const Text('Open Bluetooth Settings'),
           ),
         ],
       ),
@@ -145,6 +157,40 @@ class BluetoothCheckDialog {
     );
   }
 
+  /// Show warning dialog when permissions are denied
+  static void _showPermissionWarningDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(
+          Icons.warning,
+          size: 64,
+          color: Colors.red,
+        ),
+        title: const Text('Permissions Required'),
+        content: const Text(
+          'Bluetooth and location permissions are required for DTN Messenger to function.\n\n'
+          'Without these permissions, the app cannot discover or communicate with nearby devices.\n\n'
+          'You will need to enable them in Settings to use this app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              _showOpenSettingsDialog(context);
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Check Bluetooth status and show appropriate dialog if needed
   static Future<bool> checkAndPrompt(BuildContext context) async {
     final hasPermissions = await _bluetoothService.hasBluetoothPermissions();
@@ -155,7 +201,7 @@ class BluetoothCheckDialog {
 
     final isEnabled = await _bluetoothService.isBluetoothEnabled();
     if (!isEnabled) {
-      _showBluetoothOffDialog(context);
+      _showBluetoothSettingsDialog(context);
       return false;
     }
 
