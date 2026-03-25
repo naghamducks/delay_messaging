@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../services/dtn_service.dart';
@@ -36,6 +37,16 @@ class ChatProvider extends ChangeNotifier {
             content: 'Yes, I\'m here. Network is unstable.',
             timestamp: DateTime.now().subtract(const Duration(hours: 1, minutes: 45)),
             isSentByMe: false,
+          ),
+          Message(
+            id: 'sos1',
+            content: 'SOS - Emergency assistance needed! Medical emergency.',
+            timestamp: DateTime.now().subtract(const Duration(hours: 1)),
+            isSentByMe: true,
+            status: MessageStatus.sent,
+            isSOSMessage: true,
+            latitude: 40.7128,
+            longitude: -74.0060,
           ),
           Message(
             id: 'm3',
@@ -99,6 +110,23 @@ class ChatProvider extends ChangeNotifier {
   Future<void> sendMessage(String content, {bool isSOSMessage = false}) async {
     if (_currentChat == null || content.trim().isEmpty) return;
 
+    double? latitude;
+    double? longitude;
+
+    // Get location for SOS messages
+    if (isSOSMessage) {
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        latitude = position.latitude;
+        longitude = position.longitude;
+      } catch (e) {
+        // Location not available, continue without it
+        print('Failed to get location for SOS message: $e');
+      }
+    }
+
     final newMessage = Message(
       id: 'm_${DateTime.now().millisecondsSinceEpoch}',
       content: content,
@@ -106,6 +134,8 @@ class ChatProvider extends ChangeNotifier {
       isSentByMe: true,
       status: MessageStatus.sent,
       isSOSMessage: isSOSMessage,
+      latitude: latitude,
+      longitude: longitude,
     );
 
     // Add message to current chat
@@ -125,6 +155,30 @@ class ChatProvider extends ChangeNotifier {
 
     // Simulate DTN message status progression
     _simulateMessageStatusProgression(newMessage);
+  }
+
+  /// Pin/unpin a conversation for quicker access
+  void togglePin(String chatId) {
+    final chatIndex = _chats.indexWhere((c) => c.id == chatId);
+    if (chatIndex == -1) return;
+
+    final updatedChat = _chats[chatIndex].copyWith(
+      pinned: !_chats[chatIndex].pinned,
+    );
+
+    _chats[chatIndex] = updatedChat;
+
+    if (_currentChat?.id == chatId) {
+      _currentChat = updatedChat;
+    }
+
+    notifyListeners();
+  }
+
+  /// Add a new chat conversation
+  void addChat(Chat chat) {
+    _chats.add(chat);
+    notifyListeners();
   }
 
   /// Simulate the progression of message status in DTN network

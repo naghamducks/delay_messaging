@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/chat_provider.dart';
+import '../models/chat.dart';
 import 'chat_screen.dart';
+import 'conversations_screen.dart';
 import 'nearby_devices_screen.dart';
-import 'relay_history_screen.dart';
 import 'settings_screen.dart';
 
 /// Main home screen with bottom navigation
@@ -19,9 +20,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = const [
-    ChatScreen(),
-    NearbyDevicesScreen(),
-    RelayHistoryScreen(),
+    ConversationsScreen(),
+    LocationScreen(),
   ];
 
   @override
@@ -31,10 +31,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: _currentIndex == 0
-            ? _buildChatSelector(chatProvider)
-            : Text(_getAppBarTitle()),
+        title: Text(_getAppBarTitle()),
         actions: [
+          // Add new chat button (only on Chats tab)
+          if (_currentIndex == 0)
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => _showCreateChatDialog(context, chatProvider),
+              tooltip: 'New conversation',
+            ),
           // Light/Dark mode toggle
           IconButton(
             icon: Icon(
@@ -71,54 +76,60 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Chats',
           ),
           NavigationDestination(
-            icon: Icon(Icons.devices_outlined),
-            selectedIcon: Icon(Icons.devices),
-            label: 'Nearby Devices',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history),
-            label: 'Relay History',
+            icon: Icon(Icons.location_on_outlined),
+            selectedIcon: Icon(Icons.location_on),
+            label: 'Location',
           ),
         ],
       ),
     );
   }
 
-  /// Build the chat selector dropdown in app bar
-  Widget _buildChatSelector(ChatProvider chatProvider) {
-    return PopupMenuButton<String>(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(chatProvider.currentChat?.name ?? 'Select Chat'),
-          const SizedBox(width: 8),
-          const Icon(Icons.arrow_drop_down),
-        ],
-      ),
-      onSelected: (chatId) {
-        final chat = chatProvider.chats.firstWhere((c) => c.id == chatId);
-        chatProvider.setCurrentChat(chat);
-      },
-      itemBuilder: (context) {
-        return chatProvider.chats.map((chat) {
-          return PopupMenuItem<String>(
-            value: chat.id,
-            child: Row(
-              children: [
-                Icon(
-                  Icons.circle,
-                  size: 12,
-                  color: chat.id == chatProvider.currentChat?.id
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey,
-                ),
-                const SizedBox(width: 12),
-                Text(chat.name),
-              ],
+
+
+  /// Show dialog to create a new chat
+  void _showCreateChatDialog(BuildContext context, ChatProvider chatProvider) {
+    final nameController = TextEditingController();
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('New conversation'),
+          content: TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              labelText: 'Contact name',
+              hintText: 'e.g. Team Alpha',
             ),
-          );
-        }).toList();
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = nameController.text.trim();
+                if (name.isEmpty) return;
+                Navigator.pop(context);
+                final newChat = Chat(
+                  id: 'chat_${DateTime.now().millisecondsSinceEpoch}',
+                  name: name,
+                  messages: [],
+                  lastMessageTime: DateTime.now(),
+                );
+                chatProvider.addChat(newChat);
+                chatProvider.setCurrentChat(newChat);
+                // Navigate to chat screen
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const ChatScreen()),
+                );
+              },
+              child: const Text('Create'),
+            ),
+          ],
+        );
       },
     );
   }
@@ -126,10 +137,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Get app bar title based on current tab
   String _getAppBarTitle() {
     switch (_currentIndex) {
+      case 0:
+        return 'Chats';
       case 1:
-        return 'Nearby Devices';
-      case 2:
-        return 'Relay History';
+        return 'Location';
       default:
         return 'DTN Messenger';
     }

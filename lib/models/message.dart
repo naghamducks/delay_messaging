@@ -14,6 +14,8 @@ class Message {
   final bool isSentByMe;
   final MessageStatus status;
   final bool isSOSMessage;
+  final double? latitude;
+  final double? longitude;
 
   Message({
     required this.id,
@@ -22,6 +24,8 @@ class Message {
     required this.isSentByMe,
     this.status = MessageStatus.sent,
     this.isSOSMessage = false,
+    this.latitude,
+    this.longitude,
   });
 
   /// Create a copy of the message with updated fields
@@ -32,6 +36,8 @@ class Message {
     bool? isSentByMe,
     MessageStatus? status,
     bool? isSOSMessage,
+    double? latitude,
+    double? longitude,
   }) {
     return Message(
       id: id ?? this.id,
@@ -40,6 +46,8 @@ class Message {
       isSentByMe: isSentByMe ?? this.isSentByMe,
       status: status ?? this.status,
       isSOSMessage: isSOSMessage ?? this.isSOSMessage,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
     );
   }
 
@@ -52,6 +60,8 @@ class Message {
       'isSentByMe': isSentByMe,
       'status': status.index,
       'isSOSMessage': isSOSMessage,
+      'latitude': latitude,
+      'longitude': longitude,
     };
   }
 
@@ -64,6 +74,8 @@ class Message {
       isSentByMe: json['isSentByMe'],
       status: MessageStatus.values[json['status']],
       isSOSMessage: json['isSOSMessage'] ?? false,
+      latitude: json['latitude'],
+      longitude: json['longitude'],
     );
   }
 }

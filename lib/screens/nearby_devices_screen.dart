@@ -1,67 +1,69 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/dtn_provider.dart';
-import '../models/dtn_device.dart';
+import '../providers/chat_provider.dart';
+import '../models/message.dart';
 
-/// Screen displaying nearby DTN-capable devices
-class NearbyDevicesScreen extends StatelessWidget {
-  const NearbyDevicesScreen({super.key});
+/// Screen displaying locations of SOS messages
+class LocationScreen extends StatelessWidget {
+  const LocationScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<DTNProvider>(
-      builder: (context, dtnProvider, child) {
+    return Consumer<ChatProvider>(
+      builder: (context, chatProvider, child) {
+        // Collect all SOS messages with locations
+        final sosMessages = <Message>[];
+        for (final chat in chatProvider.chats) {
+          for (final message in chat.messages) {
+            if (message.isSOSMessage && message.latitude != null && message.longitude != null) {
+              sosMessages.add(message);
+            }
+          }
+        }
+
         return Column(
           children: [
-            // Scan button
+            // Header
             Padding(
               padding: const EdgeInsets.all(16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => dtnProvider.scanForDevices(),
-                  icon: const Icon(Icons.radar),
-                  label: const Text('Scan for Devices'),
-                ),
+              child: Text(
+                'SOS Message Locations',
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
             ),
-            // Device list
+            // SOS messages list
             Expanded(
-              child: dtnProvider.nearbyDevices.isEmpty
+              child: sosMessages.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.devices_outlined,
+                            Icons.location_off,
                             size: 64,
                             color: Theme.of(context).colorScheme.secondary,
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'No devices found',
+                            'No SOS locations',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Tap scan to discover nearby DTN nodes',
+                            'SOS messages with location data will appear here',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                   color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                                 ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
                     )
                   : ListView.builder(
-                      itemCount: dtnProvider.nearbyDevices.length,
+                      itemCount: sosMessages.length,
                       itemBuilder: (context, index) {
-                        final device = dtnProvider.nearbyDevices[index];
-                        return _DeviceListItem(
-                          device: device,
-                          onToggleConnection: () {
-                            dtnProvider.toggleDeviceConnection(device.id);
-                          },
-                        );
+                        final message = sosMessages[index];
+                        return _SOSLocationItem(message: message);
                       },
                     ),
             ),
@@ -72,105 +74,65 @@ class NearbyDevicesScreen extends StatelessWidget {
   }
 }
 
-/// Individual device list item
-class _DeviceListItem extends StatelessWidget {
-  final DTNDevice device;
-  final VoidCallback onToggleConnection;
+/// Individual SOS location list item
+class _SOSLocationItem extends StatelessWidget {
+  final Message message;
 
-  const _DeviceListItem({
-    required this.device,
-    required this.onToggleConnection,
-  });
+  const _SOSLocationItem({required this.message});
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: device.isConnected
-              ? colorScheme.primaryContainer
-              : colorScheme.surfaceContainerHighest,
+          backgroundColor: Theme.of(context).colorScheme.errorContainer,
           child: Icon(
-            _getDeviceIcon(),
-            color: device.isConnected
-                ? colorScheme.onPrimaryContainer
-                : colorScheme.onSurfaceVariant,
+            Icons.warning,
+            color: Theme.of(context).colorScheme.onErrorContainer,
           ),
         ),
-        title: Text(device.name),
+        title: Text(
+          message.content,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
-            Text(device.deviceType),
+            Text(
+              'Lat: ${message.latitude!.toStringAsFixed(4)}, Lng: ${message.longitude!.toStringAsFixed(4)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(
-                  Icons.signal_cellular_alt,
-                  size: 16,
-                  color: _getSignalColor(device.signalStrength, colorScheme),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${(device.signalStrength * 100).toInt()}%',
-                  style: TextStyle(
-                    color: _getSignalColor(device.signalStrength, colorScheme),
+            Text(
+              _formatTime(message.timestamp),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Text(
-                  _getLastSeenText(),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
             ),
           ],
         ),
-        trailing: FilledButton.tonal(
-          onPressed: onToggleConnection,
-          child: Text(device.isConnected ? 'Disconnect' : 'Connect'),
+        trailing: IconButton(
+          icon: const Icon(Icons.map),
+          onPressed: () {
+            // TODO: Open map with location
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Map integration coming soon')),
+            );
+          },
+          tooltip: 'View on map',
         ),
       ),
     );
   }
 
-  /// Get icon based on device type
-  IconData _getDeviceIcon() {
-    switch (device.deviceType.toLowerCase()) {
-      case 'mobile':
-        return Icons.smartphone;
-      case 'fixed station':
-        return Icons.router;
-      case 'satellite':
-        return Icons.satellite_alt;
-      default:
-        return Icons.device_unknown;
-    }
-  }
-
-  /// Get color based on signal strength
-  Color _getSignalColor(double strength, ColorScheme colorScheme) {
-    if (strength >= 0.7) {
-      return Colors.green;
-    } else if (strength >= 0.4) {
-      return Colors.orange;
-    } else {
-      return Colors.red;
-    }
-  }
-
-  /// Get human-readable last seen text
-  String _getLastSeenText() {
+  String _formatTime(DateTime time) {
     final now = DateTime.now();
-    final difference = now.difference(device.lastSeen);
+    final difference = now.difference(time);
 
-    if (difference.inSeconds < 60) {
-      return 'Just now';
-    } else if (difference.inMinutes < 60) {
+    if (difference.inMinutes < 60) {
       return '${difference.inMinutes}m ago';
     } else if (difference.inHours < 24) {
       return '${difference.inHours}h ago';

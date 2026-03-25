@@ -10,20 +10,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Conversations tab shows chat list', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const DTNMessengerApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Should show the default chat name in the app bar dropdown.
+    expect(find.text('Emergency Contact'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Switch to the Conversations tab.
+    await tester.tap(find.text('Conversations'));
+    await tester.pumpAndSettle();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Should show at least one conversation item in the list.
+    expect(find.text('Field Team Alpha'), findsOneWidget);
   });
 }

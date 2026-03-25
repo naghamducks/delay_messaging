@@ -7,6 +7,7 @@ class Chat {
   final String? avatarUrl;
   final List<Message> messages;
   final DateTime lastMessageTime;
+  final bool pinned;
 
   Chat({
     required this.id,
@@ -14,6 +15,7 @@ class Chat {
     this.avatarUrl,
     required this.messages,
     required this.lastMessageTime,
+    this.pinned = false,
   });
 
   /// Get the last message in the chat
@@ -28,6 +30,7 @@ class Chat {
     String? avatarUrl,
     List<Message>? messages,
     DateTime? lastMessageTime,
+    bool? pinned,
   }) {
     return Chat(
       id: id ?? this.id,
@@ -35,6 +38,7 @@ class Chat {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       messages: messages ?? this.messages,
       lastMessageTime: lastMessageTime ?? this.lastMessageTime,
+      pinned: pinned ?? this.pinned,
     );
   }
 }
