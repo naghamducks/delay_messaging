@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/adapters.dart';
 import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
 import 'providers/theme_provider.dart';
@@ -6,7 +7,13 @@ import 'providers/chat_provider.dart';
 import 'providers/dtn_provider.dart';
 import 'widgets/bluetooth_check_dialog.dart';
 
-void main() {
+
+Future<void> initStorage() async {
+  await Hive.initFlutter();
+  await Hive.openBox('messages');
+}
+void main() async {
+  await initStorage();
   runApp(const DTNMessengerApp());
 }
 
