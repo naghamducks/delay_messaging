@@ -1,13 +1,26 @@
+import 'dart:math';
+
+import 'package:delay_messenger/models/dtn_message.dart';
+import 'package:delay_messenger/services/DTN_Storage_Service.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../services/dtn_service.dart';
+import '../services/dtn_manager.dart';
+import '../services/prophet_routing_service.dart';
+import '../services/transfer_service.dart';
+import '../services/battery_service.dart';
 
 /// Provider for managing chats and messages
 class ChatProvider extends ChangeNotifier {
   final DTNService _dtnService = DTNService();
-  
+  final DtnStorageService _storage = DtnStorageService();
+  final ProphetRoutingService _routing = ProphetRoutingService();
+  //final TransferService _transfer = TransferService();
+  final BatteryService _battery = BatteryService();
+  late final DtnManager _dtnManager;
+
   List<Chat> _chats = [];
   Chat? _currentChat;
 
@@ -15,7 +28,64 @@ class ChatProvider extends ChangeNotifier {
   Chat? get currentChat => _currentChat;
 
   ChatProvider() {
-    _initializeMockData();
+    _dtnManager = DtnManager(
+      storage: _storage,
+      routing: _routing,
+     // transfer: _transfer,
+      battery: _battery,
+    );
+    loadStoredMessages();
+  }
+
+  /// Load stored DTN messages and convert to chat messages
+  void loadStoredMessages() {
+    final dtnMessages = _storage.getAllMessages();
+    
+    if (dtnMessages.isNotEmpty) {
+      // Group messages by destination (chat ID)
+      final messagesByChat = <String, List<Message>>{};
+
+      for (final dtnMsg in dtnMessages) {
+        final chatId = dtnMsg.destination;
+        if (!messagesByChat.containsKey(chatId)) {
+          messagesByChat[chatId] = [];
+        }
+
+        final message = Message(
+          id: dtnMsg.id,
+          content: dtnMsg.payload,
+          timestamp: dtnMsg.createdAt,
+          isSentByMe: dtnMsg.source == 'this_device',
+          status: MessageStatus.relayed, // Assume stored messages are relayed
+          isSOSMessage: dtnMsg.priority > 5,
+        );
+
+        messagesByChat[chatId]!.add(message);
+      }
+
+      // Create chats from the grouped messages
+      _chats = messagesByChat.entries.map((entry) {
+        final chatId = entry.key;
+        final messages = entry.value;
+        messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+        return Chat(
+          id: chatId,
+          name: 'Chat ${chatId.substring(0, min(10, chatId.length))}',
+          messages: messages,
+          lastMessageTime: messages.last.timestamp,
+        );
+      }).toList();
+    } else {
+      // Fallback to mock data if no stored messages
+      _initializeMockData();
+    }
+
+    if (_chats.isNotEmpty) {
+      _currentChat = _chats[0];
+    }
+
+    notifyListeners();
   }
 
   /// Initialize with mock data for demonstration
@@ -127,8 +197,24 @@ class ChatProvider extends ChangeNotifier {
       }
     }
 
+    // Create message ID
+    final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Create DTN message and store it
+    final dtnMessage = DtnMessage(
+      id: messageId,
+      source: 'this_device', // TODO: Use actual device ID
+      destination: _currentChat!.id, // Use chat ID as destination
+      payload: content,
+      createdAt: DateTime.now(),
+      ttl: 3600, // 1 hour TTL
+      priority: isSOSMessage ? 10 : 5, // Higher priority for SOS
+    );
+
+    _storage.saveMessage(dtnMessage);
+
     final newMessage = Message(
-      id: 'm_${DateTime.now().millisecondsSinceEpoch}',
+      id: messageId,
       content: content,
       timestamp: DateTime.now(),
       isSentByMe: true,
@@ -221,7 +307,7 @@ class ChatProvider extends ChangeNotifier {
     if (chatIndex == -1) return;
 
     final newMessage = Message(
-      id: 'm_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
       content: content,
       timestamp: DateTime.now(),
       isSentByMe: false,

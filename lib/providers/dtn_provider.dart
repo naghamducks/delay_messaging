@@ -1,9 +1,21 @@
+import 'package:delay_messenger/models/dtn_message.dart';
 import 'package:flutter/material.dart';
 import '../models/dtn_device.dart';
 import '../models/relay_history.dart';
+import '../services/dtn_manager.dart';
+import '../services/DTN_Storage_Service.dart';
+import '../services/prophet_routing_service.dart';
+import '../services/transfer_service.dart';
+import '../services/battery_service.dart';
 
 /// Provider for managing DTN-specific functionality (devices, relay history)
 class DTNProvider extends ChangeNotifier {
+  final DtnStorageService _storage = DtnStorageService();
+  final ProphetRoutingService _routing = ProphetRoutingService();
+  //final TransferService _transfer = TransferService();
+  final BatteryService _battery = BatteryService();
+  late final DtnManager _dtnManager;
+
   List<DTNDevice> _nearbyDevices = [];
   List<RelayHistory> _relayHistory = [];
 
@@ -11,6 +23,12 @@ class DTNProvider extends ChangeNotifier {
   List<RelayHistory> get relayHistory => _relayHistory;
 
   DTNProvider() {
+    _dtnManager = DtnManager(
+      storage: _storage,
+      routing: _routing,
+     // transfer: _transfer,
+      battery: _battery,
+    );
     _initializeMockData();
   }
 
@@ -128,9 +146,8 @@ class DTNProvider extends ChangeNotifier {
     }
   }
 
-  /// Add a relay history entry
-  void addRelayHistory(RelayHistory relay) {
-    _relayHistory.insert(0, relay);
-    notifyListeners();
+  /// Get all stored DTN messages
+  List<DtnMessage> getStoredMessages() {
+    return _storage.getAllMessages();
   }
 }

@@ -2,61 +2,62 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/dtn_provider.dart';
 import '../models/relay_history.dart';
+import '../models/dtn_message.dart';
+import '../services/DTN_Storage_Service.dart';
 import 'package:intl/intl.dart';
 
-/// Screen displaying message relay history
+/// Screen displaying stored DTN messages
 class RelayHistoryScreen extends StatelessWidget {
   const RelayHistoryScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<DTNProvider>(
-      builder: (context, dtnProvider, child) {
-        if (dtnProvider.relayHistory.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.history_outlined,
-                  size: 64,
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No relay history',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Message relay events will appear here',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                      ),
-                ),
-              ],
-            ),
-          );
-        }
+    final dtnProvider = Provider.of<DTNProvider>(context);
+    final storedMessages = dtnProvider.getStoredMessages();
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: dtnProvider.relayHistory.length,
-          itemBuilder: (context, index) {
-            final relay = dtnProvider.relayHistory[index];
-            return _RelayHistoryItem(relay: relay);
-          },
-        );
+    if (storedMessages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.storage_outlined,
+              size: 64,
+              color: Theme.of(context).colorScheme.secondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No stored messages',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'DTN messages will appear here when stored',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: storedMessages.length,
+      itemBuilder: (context, index) {
+        final message = storedMessages[index];
+        return _DTNMessageItem(message: message);
       },
     );
   }
 }
 
-/// Individual relay history item
-class _RelayHistoryItem extends StatelessWidget {
-  final RelayHistory relay;
+/// Individual DTN message item
+class _DTNMessageItem extends StatelessWidget {
+  final DtnMessage message;
 
-  const _RelayHistoryItem({required this.relay});
+  const _DTNMessageItem({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -69,25 +70,24 @@ class _RelayHistoryItem extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with status
+            // Header with message ID and timestamp
             Row(
               children: [
                 Icon(
-                  relay.successful ? Icons.check_circle : Icons.error,
-                  color: relay.successful ? Colors.green : Colors.red,
+                  Icons.message,
+                  color: colorScheme.primary,
                   size: 20,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  relay.successful ? 'Relay Successful' : 'Relay Failed',
+                  'Message ${message.id.substring(0, 8)}...',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: relay.successful ? Colors.green : Colors.red,
                         fontWeight: FontWeight.bold,
                       ),
                 ),
                 const Spacer(),
                 Text(
-                  _formatTime(relay.relayTime),
+                  _formatTime(message.createdAt),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurface.withOpacity(0.6),
                       ),
@@ -95,40 +95,26 @@ class _RelayHistoryItem extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            // Message preview
+            // Message payload
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.message,
-                    size: 16,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      relay.messagePreview,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
+              child: Text(
+                message.payload,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
             const SizedBox(height: 12),
-            // Relay path
+            // Source and destination
             Row(
               children: [
                 Expanded(
                   child: _buildDeviceChip(
                     context,
-                    relay.fromDevice,
+                    'From: ${message.source}',
                     Icons.send,
                     colorScheme.primaryContainer,
                     colorScheme.onPrimaryContainer,
@@ -145,11 +131,42 @@ class _RelayHistoryItem extends StatelessWidget {
                 Expanded(
                   child: _buildDeviceChip(
                     context,
-                    relay.toDevice,
-                    Icons.router,
+                    'To: ${message.destination}',
+                    Icons.inbox,
                     colorScheme.secondaryContainer,
                     colorScheme.onSecondaryContainer,
                   ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Priority and TTL info
+            Row(
+              children: [
+                Icon(
+                  Icons.priority_high,
+                  size: 16,
+                  color: message.priority > 5 ? Colors.red : colorScheme.onSurface.withOpacity(0.6),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Priority: ${message.priority}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                ),
+                const SizedBox(width: 16),
+                Icon(
+                  Icons.timer,
+                  size: 16,
+                  color: colorScheme.onSurface.withOpacity(0.6),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'TTL: ${message.ttl}s',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurface.withOpacity(0.6),
+                      ),
                 ),
               ],
             ),
