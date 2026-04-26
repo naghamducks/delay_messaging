@@ -1,3 +1,4 @@
+import 'package:delay_messenger/providers/dtn_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
@@ -5,7 +6,7 @@ import '../providers/chat_provider.dart';
 import '../models/chat.dart';
 import 'chat_screen.dart';
 import 'conversations_screen.dart';
-import 'nearby_devices_screen.dart';
+import 'location_screen.dart';
 import 'settings_screen.dart';
 
 /// Main home screen with bottom navigation
@@ -48,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => themeProvider.toggleTheme(),
             tooltip: 'Toggle theme',
           ),
+       
           // Settings icon
           IconButton(
             icon: const Icon(Icons.settings),

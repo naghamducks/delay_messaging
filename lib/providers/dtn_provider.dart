@@ -1,153 +1,61 @@
 import 'package:delay_messenger/models/dtn_message.dart';
+import 'package:delay_messenger/services/node_identity.dart';
+import 'package:delay_messenger/services/service_locator.dart';
 import 'package:flutter/material.dart';
 import '../models/dtn_device.dart';
 import '../models/relay_history.dart';
 import '../services/dtn_manager.dart';
-import '../services/DTN_Storage_Service.dart';
-import '../services/prophet_routing_service.dart';
-import '../services/transfer_service.dart';
-import '../services/battery_service.dart';
 
-/// Provider for managing DTN-specific functionality (devices, relay history)
 class DTNProvider extends ChangeNotifier {
-  final DtnStorageService _storage = DtnStorageService();
-  final ProphetRoutingService _routing = ProphetRoutingService();
-  //final TransferService _transfer = TransferService();
-  final BatteryService _battery = BatteryService();
-  late final DtnManager _dtnManager;
+  // All services come from the shared singleton — no local instantiation
+  DtnManager get dtnManager => ServiceLocator.dtnManager;
 
-  List<DTNDevice> _nearbyDevices = [];
-  List<RelayHistory> _relayHistory = [];
+  List<DTNDevice>    _nearbyDevices = [];
+  List<RelayHistory> _relayHistory  = [];
 
-  List<DTNDevice> get nearbyDevices => _nearbyDevices;
-  List<RelayHistory> get relayHistory => _relayHistory;
+  List<DTNDevice>    get nearbyDevices => _nearbyDevices;
+  List<RelayHistory> get relayHistory  => _relayHistory;
 
   DTNProvider() {
-    _dtnManager = DtnManager(
-      storage: _storage,
-      routing: _routing,
-     // transfer: _transfer,
-      battery: _battery,
-    );
     _initializeMockData();
   }
 
-  /// Initialize with mock data for demonstration
-  void _initializeMockData() {
-    _nearbyDevices = [
-      DTNDevice(
-        id: 'd1',
-        name: 'Field Device Alpha',
-        deviceType: 'Mobile',
-        signalStrength: 0.85,
-        isConnected: true,
-        lastSeen: DateTime.now().subtract(const Duration(seconds: 30)),
-      ),
-      DTNDevice(
-        id: 'd2',
-        name: 'Relay Node 7',
-        deviceType: 'Fixed Station',
-        signalStrength: 0.65,
-        isConnected: true,
-        lastSeen: DateTime.now().subtract(const Duration(minutes: 1)),
-      ),
-      DTNDevice(
-        id: 'd3',
-        name: 'Emergency Responder Unit',
-        deviceType: 'Mobile',
-        signalStrength: 0.45,
-        isConnected: false,
-        lastSeen: DateTime.now().subtract(const Duration(minutes: 5)),
-      ),
-      DTNDevice(
-        id: 'd4',
-        name: 'Base Station Charlie',
-        deviceType: 'Fixed Station',
-        signalStrength: 0.92,
-        isConnected: true,
-        lastSeen: DateTime.now().subtract(const Duration(seconds: 15)),
-      ),
-      DTNDevice(
-        id: 'd5',
-        name: 'Satellite Relay',
-        deviceType: 'Satellite',
-        signalStrength: 0.55,
-        isConnected: true,
-        lastSeen: DateTime.now().subtract(const Duration(minutes: 2)),
-      ),
-    ];
-
-    _relayHistory = [
-      RelayHistory(
-        id: 'r1',
-        messageId: 'm1',
-        messagePreview: 'Hello! Are you there?',
-        fromDevice: 'This Device',
-        toDevice: 'Relay Node 7',
-        relayTime: DateTime.now().subtract(const Duration(hours: 1, minutes: 50)),
-        successful: true,
-      ),
-      RelayHistory(
-        id: 'r2',
-        messageId: 'm1',
-        messagePreview: 'Hello! Are you there?',
-        fromDevice: 'Relay Node 7',
-        toDevice: 'Base Station Charlie',
-        relayTime: DateTime.now().subtract(const Duration(hours: 1, minutes: 45)),
-        successful: true,
-      ),
-      RelayHistory(
-        id: 'r3',
-        messageId: 'm5',
-        messagePreview: 'All clear. Continuing to waypoint B.',
-        fromDevice: 'This Device',
-        toDevice: 'Field Device Alpha',
-        relayTime: DateTime.now().subtract(const Duration(hours: 2, minutes: 28)),
-        successful: true,
-      ),
-      RelayHistory(
-        id: 'r4',
-        messageId: 'm3',
-        messagePreview: 'Stay safe. I\'ll keep trying to reach you.',
-        fromDevice: 'This Device',
-        toDevice: 'Relay Node 7',
-        relayTime: DateTime.now().subtract(const Duration(minutes: 28)),
-        successful: false,
-      ),
-    ];
-
-    notifyListeners();
-  }
-
-  /// Simulate scanning for nearby devices
   Future<void> scanForDevices() async {
-    // In a real implementation, this would use BLE, WiFi Direct, or other DTN protocols
+    await ServiceLocator.dtnManager.startBle();
+    // BLE scan results will come back via the onPeerConnected callback;
+    // update _nearbyDevices there once real BLE data arrives.
     await Future.delayed(const Duration(seconds: 2));
-    
-    // Update signal strengths and last seen times
-    _nearbyDevices = _nearbyDevices.map((device) {
-      return device.copyWith(
-        signalStrength: (device.signalStrength + (0.1 - 0.05 * 2 * (device.signalStrength > 0.5 ? 1 : -1))).clamp(0.0, 1.0),
-        lastSeen: DateTime.now(),
-      );
-    }).toList();
-
     notifyListeners();
   }
 
-  /// Toggle connection to a device
-  void toggleDeviceConnection(String deviceId) {
-    final deviceIndex = _nearbyDevices.indexWhere((d) => d.id == deviceId);
-    if (deviceIndex != -1) {
-      _nearbyDevices[deviceIndex] = _nearbyDevices[deviceIndex].copyWith(
-        isConnected: !_nearbyDevices[deviceIndex].isConnected,
-      );
-      notifyListeners();
+void runProphetTest() {
+  print('\n🧪 ===== PROPHET ROUTING TEST =====\n');
+
+  // Clean up previous test messages to avoid accumulation
+  final existing = ServiceLocator.storage.getAllMessages();
+  for (final m in existing) {
+    if (m.id.startsWith('msg_test_')) {
+      ServiceLocator.storage.deleteMessage(m.id);
     }
   }
 
-  /// Get all stored DTN messages
-  List<DtnMessage> getStoredMessages() {
-    return _storage.getAllMessages();
-  }
+  final msg = DtnMessage(
+    id:          'msg_test_${DateTime.now().millisecondsSinceEpoch}',
+    source:      NodeIdentity.id,   // ← fixed
+    destination: 'nodeC',
+    payload:     'Test DTN message for routing',
+    createdAt:   DateTime.now(),
+    ttl:         300,
+    priority:    3,
+  );
+  ServiceLocator.storage.saveMessage(msg);
+
+  final peerPreds = {'nodeA': 0.2, 'nodeB': 0.8, 'nodeC': 0.9};
+  ServiceLocator.dtnManager.onPeerConnected('nodeB', peerPreds, []);
+
+  print('🧪 ===== PROPHET TEST COMPLETE =====\n');
+}
+  // Keep existing mock data and toggle helpers unchanged
+  void _initializeMockData() { /* your existing code */ }
+  void toggleDeviceConnection(String deviceId) { /* your existing code */ }
 }

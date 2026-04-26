@@ -16,14 +16,28 @@ class TransferService {
   ) {
     List<DtnMessage> toSend = [];
 
+    print("\n🔍 DECIDING MESSAGES TO SEND:");
+    print("   Evaluating ${myMessages.length} messages against peer $peerId\n");
+
     for (var msg in myMessages) {
-      if (peerMessages.contains(msg.id)) continue;
+      // Check if peer already has this message
+      if (peerMessages.contains(msg.id)) {
+        print("   ⏭️  ${msg.id}: SKIP (peer already has it)");
+        continue;
+      }
 
       double myP = routing.getPred(msg.destination);
       double peerP = peerPreds[msg.destination] ?? 0;
 
-      // ⭐ PRoPHET condition
-      if (peerP >= myP) {
+      // ⭐ PRoPHET condition: forward if peer has better delivery probability
+      bool shouldForward = peerP >= myP;
+
+      print(
+        "   ${shouldForward ? "✅" : "❌"} ${msg.id} → ${msg.destination}: "
+        "myP=$myP, peerP=$peerP ${shouldForward ? "(peer is better!)" : "(I'm better)"}",
+      );
+
+      if (shouldForward) {
         toSend.add(msg);
       }
     }

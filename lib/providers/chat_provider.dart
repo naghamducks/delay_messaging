@@ -1,328 +1,300 @@
 import 'dart:math';
-
 import 'package:delay_messenger/models/dtn_message.dart';
-import 'package:delay_messenger/services/DTN_Storage_Service.dart';
+import 'package:delay_messenger/services/service_locator.dart';
+import 'package:delay_messenger/services/node_identity.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
-import '../services/dtn_service.dart';
-import '../services/dtn_manager.dart';
-import '../services/prophet_routing_service.dart';
-import '../services/transfer_service.dart';
-import '../services/battery_service.dart';
 
-/// Provider for managing chats and messages
 class ChatProvider extends ChangeNotifier {
-  final DTNService _dtnService = DTNService();
-  final DtnStorageService _storage = DtnStorageService();
-  final ProphetRoutingService _routing = ProphetRoutingService();
-  //final TransferService _transfer = TransferService();
-  final BatteryService _battery = BatteryService();
-  late final DtnManager _dtnManager;
+  // Use the shared singleton services — no more local instantiation
+  final _storage    = ServiceLocator.storage;
+  final _dtnManager = ServiceLocator.dtnManager;
 
   List<Chat> _chats = [];
   Chat? _currentChat;
 
-  List<Chat> get chats => _chats;
-  Chat? get currentChat => _currentChat;
+  List<Chat> get chats    => _chats;
+  Chat? get currentChat   => _currentChat;
 
   ChatProvider() {
-    _dtnManager = DtnManager(
-      storage: _storage,
-      routing: _routing,
-     // transfer: _transfer,
-      battery: _battery,
-    );
+    // Wire up the delivered-message callback
+    _dtnManager.onMessageDelivered = _onMessageDelivered;
     loadStoredMessages();
   }
 
-  /// Load stored DTN messages and convert to chat messages
+  // ── Incoming message handler ───────────────────────────────────────────────
+  void _onMessageDelivered(DtnMessage dtnMsg) {
+    // Determine if this is an SOS message (priority > 5)
+    final isSOSMessage = dtnMsg.priority > 5;
+
+    // Find or create a chat for this sender
+    final senderId = dtnMsg.source;
+    var chatIndex  = _chats.indexWhere((c) => c.id == senderId);
+
+    if (chatIndex == -1) {
+      _chats.add(Chat(
+        id:              senderId,
+        name:            'Node $senderId',
+        messages:        [],
+        lastMessageTime: DateTime.now(),
+      ));
+      chatIndex = _chats.length - 1;
+    }
+
+    // For SOS messages, try to extract lat/long from payload if they were encoded
+    // Format: "CONTENT|lat,lng" or just "CONTENT"
+    double? latitude, longitude;
+    String content = dtnMsg.payload;
+    
+    if (isSOSMessage && dtnMsg.payload.contains('|')) {
+      final parts = dtnMsg.payload.split('|');
+      if (parts.length >= 2) {
+        content = parts[0];
+        try {
+          final coords = parts[1].split(',');
+          if (coords.length == 2) {
+            latitude = double.parse(coords[0]);
+            longitude = double.parse(coords[1]);
+          }
+        } catch (_) {
+          // Parsing failed, ignore location
+        }
+      }
+    }
+
+    final newMessage = Message(
+      id:          dtnMsg.id,
+      content:     content,
+      timestamp:   dtnMsg.createdAt,
+      isSentByMe:  false,
+      isSOSMessage: isSOSMessage,
+      latitude:    latitude,
+      longitude:   longitude,
+    );
+
+    final updated = List<Message>.from(_chats[chatIndex].messages)..add(newMessage);
+    _chats[chatIndex] = _chats[chatIndex].copyWith(
+      messages:        updated,
+      lastMessageTime: newMessage.timestamp,
+    );
+
+    if (_currentChat?.id == senderId) {
+      _currentChat = _chats[chatIndex];
+    }
+
+    notifyListeners();
+  }
+
+  // ── Load persisted messages ────────────────────────────────────────────────
   void loadStoredMessages() {
     final dtnMessages = _storage.getAllMessages();
-    
-    if (dtnMessages.isNotEmpty) {
-      // Group messages by destination (chat ID)
-      final messagesByChat = <String, List<Message>>{};
-
-      for (final dtnMsg in dtnMessages) {
-        final chatId = dtnMsg.destination;
-        if (!messagesByChat.containsKey(chatId)) {
-          messagesByChat[chatId] = [];
-        }
-
-        final message = Message(
-          id: dtnMsg.id,
-          content: dtnMsg.payload,
-          timestamp: dtnMsg.createdAt,
-          isSentByMe: dtnMsg.source == 'this_device',
-          status: MessageStatus.relayed, // Assume stored messages are relayed
-          isSOSMessage: dtnMsg.priority > 5,
-        );
-
-        messagesByChat[chatId]!.add(message);
-      }
-
-      // Create chats from the grouped messages
-      _chats = messagesByChat.entries.map((entry) {
-        final chatId = entry.key;
-        final messages = entry.value;
-        messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-        return Chat(
-          id: chatId,
-          name: 'Chat ${chatId.substring(0, min(10, chatId.length))}',
-          messages: messages,
-          lastMessageTime: messages.last.timestamp,
-        );
-      }).toList();
-    } else {
-      // Fallback to mock data if no stored messages
+    if (dtnMessages.isEmpty) {
       _initializeMockData();
+      return;
     }
 
-    if (_chats.isNotEmpty) {
-      _currentChat = _chats[0];
+    final byChat = <String, List<Message>>{};
+    for (final m in dtnMessages) {
+      final chatId = m.source == NodeIdentity.id ? m.destination : m.source;
+      final isSOSMessage = m.priority > 5;
+      
+      // Extract location from payload if present
+      double? latitude, longitude;
+      String content = m.payload;
+      
+      if (isSOSMessage && m.payload.contains('|')) {
+        final parts = m.payload.split('|');
+        if (parts.length >= 2) {
+          content = parts[0];
+          try {
+            final coords = parts[1].split(',');
+            if (coords.length == 2) {
+              latitude = double.parse(coords[0]);
+              longitude = double.parse(coords[1]);
+            }
+          } catch (_) {}
+        }
+      }
+      
+      byChat.putIfAbsent(chatId, () => []).add(Message(
+        id:          m.id,
+        content:     content,
+        timestamp:   m.createdAt,
+        isSentByMe:  m.source == NodeIdentity.id,
+        status:      MessageStatus.relayed,
+        isSOSMessage: isSOSMessage,
+        latitude:    latitude,
+        longitude:   longitude,
+      ));
     }
 
+    _chats = byChat.entries.map((e) {
+      final msgs = e.value..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return Chat(
+        id:              e.key,
+        name:            'Node ${e.key.substring(0, min(10, e.key.length))}',
+        messages:        msgs,
+        lastMessageTime: msgs.last.timestamp,
+      );
+    }).toList();
+
+    _currentChat = _chats.isNotEmpty ? _chats.first : null;
     notifyListeners();
   }
 
-  /// Initialize with mock data for demonstration
-  void _initializeMockData() {
-    _chats = [
-      Chat(
-        id: '1',
-        name: 'Emergency Contact',
-        messages: [
-          Message(
-            id: 'm1',
-            content: 'Hello! Are you there?',
-            timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-            isSentByMe: true,
-            status: MessageStatus.relayed,
-          ),
-          Message(
-            id: 'm2',
-            content: 'Yes, I\'m here. Network is unstable.',
-            timestamp: DateTime.now().subtract(const Duration(hours: 1, minutes: 45)),
-            isSentByMe: false,
-          ),
-          Message(
-            id: 'sos1',
-            content: 'SOS - Emergency assistance needed! Medical emergency.',
-            timestamp: DateTime.now().subtract(const Duration(hours: 1)),
-            isSentByMe: true,
-            status: MessageStatus.sent,
-            isSOSMessage: true,
-            latitude: 40.7128,
-            longitude: -74.0060,
-          ),
-          Message(
-            id: 'm3',
-            content: 'Stay safe. I\'ll keep trying to reach you.',
-            timestamp: DateTime.now().subtract(const Duration(minutes: 30)),
-            isSentByMe: true,
-            status: MessageStatus.searchingForRelay,
-          ),
-        ],
-        lastMessageTime: DateTime.now().subtract(const Duration(minutes: 30)),
-      ),
-      Chat(
-        id: '2',
-        name: 'Field Team Alpha',
-        messages: [
-          Message(
-            id: 'm4',
-            content: 'Mission status update?',
-            timestamp: DateTime.now().subtract(const Duration(hours: 3)),
-            isSentByMe: false,
-          ),
-          Message(
-            id: 'm5',
-            content: 'All clear. Continuing to waypoint B.',
-            timestamp: DateTime.now().subtract(const Duration(hours: 2, minutes: 30)),
-            isSentByMe: true,
-            status: MessageStatus.relayed,
-          ),
-        ],
-        lastMessageTime: DateTime.now().subtract(const Duration(hours: 2, minutes: 30)),
-      ),
-      Chat(
-        id: '3',
-        name: 'Base Station',
-        messages: [
-          Message(
-            id: 'm6',
-            content: 'Weather update: Storm approaching.',
-            timestamp: DateTime.now().subtract(const Duration(hours: 5)),
-            isSentByMe: false,
-          ),
-        ],
-        lastMessageTime: DateTime.now().subtract(const Duration(hours: 5)),
-      ),
-    ];
+  // ── Send message ───────────────────────────────────────────────────────────
+  Future<void> sendMessage(String content, {bool isSOSMessage = false}) async {
+    if (_currentChat == null || content.trim().isEmpty) return;
 
-    if (_chats.isNotEmpty) {
-      _currentChat = _chats[0];
+    double? latitude, longitude;
+    if (isSOSMessage) {
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        latitude  = pos.latitude;
+        longitude = pos.longitude;
+      } catch (e) {
+        print('❌ Failed to get location for SOS: $e');
+      }
     }
 
+    final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
+    final destination = _currentChat!.id;
+
+    // Encode location in payload if we have it: "CONTENT|lat,lng"
+    String payloadToSend = content;
+    if (latitude != null && longitude != null) {
+      payloadToSend = '$content|$latitude,$longitude';
+    }
+
+    final dtnMsg = DtnMessage(
+      id:          messageId,
+      source:      NodeIdentity.id,
+      destination: destination,
+      payload:     payloadToSend,
+      createdAt:   DateTime.now(),
+      ttl:         3600,
+      priority:    isSOSMessage ? 10 : 5,
+    );
+    _storage.saveMessage(dtnMsg);
+
+    final uiMsg = Message(
+      id:          messageId,
+      content:     content,
+      timestamp:   DateTime.now(),
+      isSentByMe:  true,
+      status:      MessageStatus.sent,
+      isSOSMessage: isSOSMessage,
+      latitude:    latitude,
+      longitude:   longitude,
+    );
+
+    final updatedMsgs = List<Message>.from(_currentChat!.messages)..add(uiMsg);
+    _currentChat = _currentChat!.copyWith(
+      messages:        updatedMsgs,
+      lastMessageTime: uiMsg.timestamp,
+    );
+
+    final idx = _chats.indexWhere((c) => c.id == _currentChat!.id);
+    if (idx != -1) _chats[idx] = _currentChat!;
+
     notifyListeners();
+
+    // Try to send immediately if the peer is already connected over BLE
+    if (ServiceLocator.ble.isConnected(destination)) {
+      await ServiceLocator.ble.sendMessage(destination, dtnMsg);
+      _updateMessageStatus(messageId, MessageStatus.relayed);
+    } else {
+      _simulateStatusProgression(uiMsg);
+    }
   }
 
-  /// Set the current active chat
+  // ── Helpers ────────────────────────────────────────────────────────────────
   void setCurrentChat(Chat chat) {
     _currentChat = chat;
     notifyListeners();
   }
 
-  /// Send a new message in the current chat
-  Future<void> sendMessage(String content, {bool isSOSMessage = false}) async {
-    if (_currentChat == null || content.trim().isEmpty) return;
-
-    double? latitude;
-    double? longitude;
-
-    // Get location for SOS messages
-    if (isSOSMessage) {
-      try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        );
-        latitude = position.latitude;
-        longitude = position.longitude;
-      } catch (e) {
-        // Location not available, continue without it
-        print('Failed to get location for SOS message: $e');
-      }
-    }
-
-    // Create message ID
-    final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
-
-    // Create DTN message and store it
-    final dtnMessage = DtnMessage(
-      id: messageId,
-      source: 'this_device', // TODO: Use actual device ID
-      destination: _currentChat!.id, // Use chat ID as destination
-      payload: content,
-      createdAt: DateTime.now(),
-      ttl: 3600, // 1 hour TTL
-      priority: isSOSMessage ? 10 : 5, // Higher priority for SOS
-    );
-
-    _storage.saveMessage(dtnMessage);
-
-    final newMessage = Message(
-      id: messageId,
-      content: content,
-      timestamp: DateTime.now(),
-      isSentByMe: true,
-      status: MessageStatus.sent,
-      isSOSMessage: isSOSMessage,
-      latitude: latitude,
-      longitude: longitude,
-    );
-
-    // Add message to current chat
-    final updatedMessages = List<Message>.from(_currentChat!.messages)..add(newMessage);
-    _currentChat = _currentChat!.copyWith(
-      messages: updatedMessages,
-      lastMessageTime: newMessage.timestamp,
-    );
-
-    // Update in chats list
-    final chatIndex = _chats.indexWhere((c) => c.id == _currentChat!.id);
-    if (chatIndex != -1) {
-      _chats[chatIndex] = _currentChat!;
-    }
-
-    notifyListeners();
-
-    // Simulate DTN message status progression
-    _simulateMessageStatusProgression(newMessage);
-  }
-
-  /// Pin/unpin a conversation for quicker access
   void togglePin(String chatId) {
-    final chatIndex = _chats.indexWhere((c) => c.id == chatId);
-    if (chatIndex == -1) return;
-
-    final updatedChat = _chats[chatIndex].copyWith(
-      pinned: !_chats[chatIndex].pinned,
-    );
-
-    _chats[chatIndex] = updatedChat;
-
-    if (_currentChat?.id == chatId) {
-      _currentChat = updatedChat;
-    }
-
+    final i = _chats.indexWhere((c) => c.id == chatId);
+    if (i == -1) return;
+    _chats[i] = _chats[i].copyWith(pinned: !_chats[i].pinned);
+    if (_currentChat?.id == chatId) _currentChat = _chats[i];
     notifyListeners();
   }
 
-  /// Add a new chat conversation
   void addChat(Chat chat) {
     _chats.add(chat);
     notifyListeners();
   }
 
-  /// Simulate the progression of message status in DTN network
-  void _simulateMessageStatusProgression(Message message) async {
-    // After 2 seconds, move to "searching for relay"
+  void _simulateStatusProgression(Message msg) async {
     await Future.delayed(const Duration(seconds: 2));
-    _updateMessageStatus(message.id, MessageStatus.searchingForRelay);
-
-    // After 5 more seconds, move to "relayed"
+    _updateMessageStatus(msg.id, MessageStatus.searchingForRelay);
     await Future.delayed(const Duration(seconds: 5));
-    _updateMessageStatus(message.id, MessageStatus.relayed);
-
-    // In a real app, this would be driven by actual DTN events
+    _updateMessageStatus(msg.id, MessageStatus.relayed);
   }
 
-  /// Update the status of a specific message
-  void _updateMessageStatus(String messageId, MessageStatus newStatus) {
+  void _updateMessageStatus(String msgId, MessageStatus status) {
     if (_currentChat == null) return;
+    final updated = _currentChat!.messages.map((m) =>
+      m.id == msgId ? m.copyWith(status: status) : m,
+    ).toList();
+    _currentChat = _currentChat!.copyWith(messages: updated);
+    final i = _chats.indexWhere((c) => c.id == _currentChat!.id);
+    if (i != -1) _chats[i] = _currentChat!;
+    notifyListeners();
+  }
 
-    final updatedMessages = _currentChat!.messages.map((msg) {
-      if (msg.id == messageId) {
-        return msg.copyWith(status: newStatus);
+  void _initializeMockData() {
+    // Keep your existing mock data here unchanged
+  }
+
+  /// Remove SOS messages older than 24 hours from all chats
+  void purgeExpiredSosMessages() {
+    final now     = DateTime.now();
+    bool changed  = false;
+
+    _chats = _chats.map((chat) {
+      final before = chat.messages.length;
+
+      final filtered = chat.messages.where((msg) {
+        if (!msg.isSOSMessage) return true; // keep non-SOS always
+        final age = now.difference(msg.timestamp);
+        return age.inHours < 24; // keep if under 24h
+      }).toList();
+
+      if (filtered.length != before) {
+        changed = true;
+        return chat.copyWith(
+          messages: filtered,
+          lastMessageTime: filtered.isNotEmpty
+              ? filtered.last.timestamp
+              : chat.lastMessageTime,
+        );
       }
-      return msg;
+      return chat;
     }).toList();
 
-    _currentChat = _currentChat!.copyWith(messages: updatedMessages);
-
-    final chatIndex = _chats.indexWhere((c) => c.id == _currentChat!.id);
-    if (chatIndex != -1) {
-      _chats[chatIndex] = _currentChat!;
+    // Also delete from Hive storage
+    for (final msg in _storage.getAllMessages()) {
+      if (msg.priority > 5) { // SOS messages have priority > 5
+        final age = now.difference(msg.createdAt);
+        if (age.inHours >= 24) {
+          _storage.deleteMessage(msg.id);
+        }
+      }
     }
 
-    notifyListeners();
-  }
-
-  /// Receive a new message (simulated for demo)
-  void receiveMessage(String chatId, String content) {
-    final chatIndex = _chats.indexWhere((c) => c.id == chatId);
-    if (chatIndex == -1) return;
-
-    final newMessage = Message(
-      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-      content: content,
-      timestamp: DateTime.now(),
-      isSentByMe: false,
-    );
-
-    final updatedMessages = List<Message>.from(_chats[chatIndex].messages)..add(newMessage);
-    _chats[chatIndex] = _chats[chatIndex].copyWith(
-      messages: updatedMessages,
-      lastMessageTime: newMessage.timestamp,
-    );
-
-    if (_currentChat?.id == chatId) {
-      _currentChat = _chats[chatIndex];
+    if (changed) {
+      _currentChat = _chats.firstWhere(
+        (c) => c.id == _currentChat?.id,
+        orElse: () => _chats.isNotEmpty ? _chats.first : _currentChat!,
+      );
+      notifyListeners();
     }
-
-    notifyListeners();
   }
 }
