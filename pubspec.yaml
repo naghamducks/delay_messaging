@@ -25,6 +25,12 @@ dependencies:
   latlong2: ^0.9.1
   cached_network_image: ^3.3.1
   flutter_cache_manager: ^3.3.1
+  sqflite: ^2.3.3+1        # reads the MBTiles SQLite database
+  path_provider: ^2.1.4    # locates app's writable directory
+  flutter_map_cancellable_tile_provider: ^3.0.0  # clean base for custom provider
+  maplibre_gl: ^0.22.0
+  http: ^1.2.0          # only for the one-time regional map download
+  archive: ^3.6.1       # if you want to unpack compressed map data
 
 dev_dependencies:
   flutter_test:
@@ -33,7 +39,11 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
 
 flutter:
-  uses-material-design: true
+    uses-material-design: true
+    assets:
+    - assets/maps/ 
+    - assets/fonts/
+    - assets/fonts/Noto Sans Regular/
 
 flutter_launcher_icons:
   android: true

@@ -118,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 final newChat = Chat(
                   id: 'chat_${DateTime.now().millisecondsSinceEpoch}',
                   name: name,
+                  nodeId: name.toLowerCase().replaceAll(' ', '_'),
                   messages: [],
                   lastMessageTime: DateTime.now(),
                 );

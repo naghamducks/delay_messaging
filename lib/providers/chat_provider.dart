@@ -31,12 +31,13 @@ class ChatProvider extends ChangeNotifier {
 
     // Find or create a chat for this sender
     final senderId = dtnMsg.source;
-    var chatIndex  = _chats.indexWhere((c) => c.id == senderId);
+    var chatIndex  = _chats.indexWhere((c) => c.nodeId == senderId);
 
     if (chatIndex == -1) {
       _chats.add(Chat(
-        id:              senderId,
+        id:              'chat_${DateTime.now().millisecondsSinceEpoch}',
         name:            'Node $senderId',
+        nodeId:          senderId,
         messages:        [],
         lastMessageTime: DateTime.now(),
       ));
@@ -80,7 +81,7 @@ class ChatProvider extends ChangeNotifier {
       lastMessageTime: newMessage.timestamp,
     );
 
-    if (_currentChat?.id == senderId) {
+    if (_currentChat?.nodeId == senderId) {
       _currentChat = _chats[chatIndex];
     }
 
@@ -133,8 +134,9 @@ class ChatProvider extends ChangeNotifier {
     _chats = byChat.entries.map((e) {
       final msgs = e.value..sort((a, b) => a.timestamp.compareTo(b.timestamp));
       return Chat(
-        id:              e.key,
+        id:              'chat_${DateTime.now().millisecondsSinceEpoch}',
         name:            'Node ${e.key.substring(0, min(10, e.key.length))}',
+        nodeId:          e.key,
         messages:        msgs,
         lastMessageTime: msgs.last.timestamp,
       );
@@ -162,7 +164,7 @@ class ChatProvider extends ChangeNotifier {
     }
 
     final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
-    final destination = _currentChat!.id;
+    final destination = _currentChat!.nodeId ?? _currentChat!.id;
 
     // Encode location in payload if we have it: "CONTENT|lat,lng"
     String payloadToSend = content;
@@ -198,7 +200,7 @@ class ChatProvider extends ChangeNotifier {
       lastMessageTime: uiMsg.timestamp,
     );
 
-    final idx = _chats.indexWhere((c) => c.id == _currentChat!.id);
+    final idx = _chats.indexWhere((c) => c.id == _currentChat!.id || c.nodeId == _currentChat!.nodeId);
     if (idx != -1) _chats[idx] = _currentChat!;
 
     notifyListeners();
