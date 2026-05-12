@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/dtn_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/message_input_bar.dart';
 
@@ -55,7 +56,7 @@ class ChatScreen extends StatelessWidget {
 
           return Column(
             children: [
-              // Messages list
+           
               Expanded(
                 child: currentChat.messages.isEmpty
                     ? Center(

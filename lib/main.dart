@@ -1,12 +1,23 @@
+import 'package:delay_messenger/services/service_locator.dart';
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/adapters.dart';
 import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
 import 'providers/theme_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/dtn_provider.dart';
 import 'widgets/bluetooth_check_dialog.dart';
+import 'services/ble_permission_service.dart';
 
-void main() {
+Future<void> initStorage() async {
+  await Hive.initFlutter();
+  await Hive.openBox('messages');
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initStorage();
+  await ServiceLocator.init();
   runApp(const DTNMessengerApp());
 }
 
@@ -49,7 +60,6 @@ class DTNMessengerApp extends StatelessWidget {
   }
 }
 
-/// Wrapper to check Bluetooth on app start
 class BluetoothCheckWrapper extends StatefulWidget {
   const BluetoothCheckWrapper({super.key});
 
@@ -61,9 +71,15 @@ class _BluetoothCheckWrapperState extends State<BluetoothCheckWrapper> {
   @override
   void initState() {
     super.initState();
-    // Check Bluetooth after first frame is rendered
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Step 1: show your existing Bluetooth on/off check
       BluetoothCheckDialog.show(context);
+
+      // Step 2: request BLE permissions, then start scanning + advertising
+      final granted = await BlePermissionService.requestAll(context);
+      if (granted) {
+        await ServiceLocator.dtnManager.startBle();
+      }
     });
   }
 

@@ -1,20 +1,25 @@
+import 'package:delay_messenger/models/dtn_message.dart';
+import 'package:delay_messenger/providers/dtn_provider.dart';
+import 'package:delay_messenger/services/ble_transport_service.dart';
+import 'package:delay_messenger/services/service_locator.dart';
+
 import '../models/message.dart';
 import '../models/dtn_device.dart';
 
 /// Service for DTN network operations
 /// This is a placeholder for future backend integration
 class DTNService {
+  DTNProvider _dtnProvider=DTNProvider();
+  final BleTransportService ble=BleTransportService();
+
   /// Send a message through the DTN network
   /// In a real implementation, this would handle:
   /// - Message storage in the bundle layer
   /// - Routing decisions based on contact predictions
   /// - Custody transfer protocols
-  Future<void> sendMessage(Message message, String destinationId) async {
-    // TODO: Implement actual DTN protocol (e.g., Bundle Protocol)
-    // - Store message in persistent storage
-    // - Add to transmission queue
-    // - Wait for contact opportunity
-    await Future.delayed(const Duration(milliseconds: 500));
+Future<void> sendMessage(String peerId, DtnMessage msg) async {
+    // Route through the shared singleton, not a local BLE instance
+    await ServiceLocator.ble.sendMessage(peerId, msg);
   }
 
   /// Receive messages from the DTN network

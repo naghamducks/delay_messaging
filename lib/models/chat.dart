@@ -4,6 +4,7 @@ import 'message.dart';
 class Chat {
   final String id;
   final String name;
+  final String? nodeId; // DTN node ID for routing and services
   final String? avatarUrl;
   final List<Message> messages;
   final DateTime lastMessageTime;
@@ -12,6 +13,7 @@ class Chat {
   Chat({
     required this.id,
     required this.name,
+    this.nodeId,
     this.avatarUrl,
     required this.messages,
     required this.lastMessageTime,
@@ -27,6 +29,7 @@ class Chat {
   Chat copyWith({
     String? id,
     String? name,
+    String? nodeId,
     String? avatarUrl,
     List<Message>? messages,
     DateTime? lastMessageTime,
@@ -35,6 +38,7 @@ class Chat {
     return Chat(
       id: id ?? this.id,
       name: name ?? this.name,
+      nodeId: nodeId ?? this.nodeId,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       messages: messages ?? this.messages,
       lastMessageTime: lastMessageTime ?? this.lastMessageTime,
