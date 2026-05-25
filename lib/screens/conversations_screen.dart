@@ -215,17 +215,39 @@ class ConversationsScreen extends StatelessWidget {
 
   void _showCreateChatDialog(BuildContext context) {
     final nameController = TextEditingController();
+    final nodeIdController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
 
     showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('New conversation'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Contact name',
-              hintText: 'e.g. Team Alpha',
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Contact name',
+                    hintText: 'e.g. Team Alpha',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: nodeIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Peer Node ID',
+                    hintText: 'e.g. node-alpha',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Peer Node ID is required' : null,
+                ),
+              ],
             ),
           ),
           actions: [
@@ -235,16 +257,17 @@ class ConversationsScreen extends StatelessWidget {
             ),
             FilledButton(
               onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
+                if (!formKey.currentState!.validate()) return;
+                final name   = nameController.text.trim();
+                final nodeId = nodeIdController.text.trim();
                 Navigator.pop(context);
                 final provider =
                     Provider.of<ChatProvider>(context, listen: false);
                 final newChat = Chat(
-                  id: 'chat_${DateTime.now().millisecondsSinceEpoch}',
-                  name: name,
-                  nodeId: name.toLowerCase().replaceAll(' ', '_'),
-                  messages: [],
+                  id:              nodeId,
+                  name:            name,
+                  nodeId:          nodeId,
+                  messages:        [],
                   lastMessageTime: DateTime.now(),
                 );
                 provider.addChat(newChat);

@@ -1,4 +1,5 @@
 import 'package:delay_messenger/providers/dtn_provider.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
@@ -34,8 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(_getAppBarTitle()),
         actions: [
-          // Add new chat button (only on Chats tab)
-          if (_currentIndex == 0)
+          // Add new chat button (only on Chats tab, debug builds only)
+          if (_currentIndex == 0 && kDebugMode)
             IconButton(
               icon: const Icon(Icons.add),
               onPressed: () => _showCreateChatDialog(context, chatProvider),
@@ -89,20 +90,41 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
 
-  /// Show dialog to create a new chat
   void _showCreateChatDialog(BuildContext context, ChatProvider chatProvider) {
-    final nameController = TextEditingController();
+    final nameController   = TextEditingController();
+    final nodeIdController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
 
     showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('New conversation'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Contact name',
-              hintText: 'e.g. Team Alpha',
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Contact name',
+                    hintText: 'e.g. Team Alpha',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: nodeIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Peer Node ID',
+                    hintText: 'e.g. node-alpha',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Peer Node ID is required' : null,
+                ),
+              ],
             ),
           ),
           actions: [
@@ -112,19 +134,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             FilledButton(
               onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
+                if (!formKey.currentState!.validate()) return;
+                final name   = nameController.text.trim();
+                final nodeId = nodeIdController.text.trim();
                 Navigator.pop(context);
                 final newChat = Chat(
-                  id: 'chat_${DateTime.now().millisecondsSinceEpoch}',
-                  name: name,
-                  nodeId: name.toLowerCase().replaceAll(' ', '_'),
-                  messages: [],
+                  id:              nodeId,
+                  name:            name,
+                  nodeId:          nodeId,
+                  messages:        [],
                   lastMessageTime: DateTime.now(),
                 );
                 chatProvider.addChat(newChat);
                 chatProvider.setCurrentChat(newChat);
-                // Navigate to chat screen
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (context) => const ChatScreen()),
                 );

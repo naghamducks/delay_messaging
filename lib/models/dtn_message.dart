@@ -7,6 +7,7 @@ class DtnMessage {
   final int ttl;
   int copies;
   int priority;
+  String status; // 'sent' | 'relayed' | 'delivered'
 
   DtnMessage({
     required this.id,
@@ -17,9 +18,62 @@ class DtnMessage {
     required this.ttl,
     this.copies = 1,
     this.priority = 0,
+    this.status = 'sent',
   });
 
   bool isExpired() {
     return DateTime.now().difference(createdAt).inSeconds > ttl;
+  }
+
+  DtnMessage copyWith({
+    String? id,
+    String? source,
+    String? destination,
+    String? payload,
+    DateTime? createdAt,
+    int? ttl,
+    int? copies,
+    int? priority,
+    String? status,
+  }) {
+    return DtnMessage(
+      id: id ?? this.id,
+      source: source ?? this.source,
+      destination: destination ?? this.destination,
+      payload: payload ?? this.payload,
+      createdAt: createdAt ?? this.createdAt,
+      ttl: ttl ?? this.ttl,
+      copies: copies ?? this.copies,
+      priority: priority ?? this.priority,
+      status: status ?? this.status,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'source': source,
+      'destination': destination,
+      'payload': payload,
+      'createdAt': createdAt.toIso8601String(),
+      'ttl': ttl,
+      'copies': copies,
+      'priority': priority,
+      'status': status,
+    };
+  }
+
+  factory DtnMessage.fromJson(Map<String, dynamic> json) {
+    return DtnMessage(
+      id: json['id'] as String,
+      source: json['source'] as String,
+      destination: json['destination'] as String,
+      payload: json['payload'] as String,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+      ttl: json['ttl'] as int,
+      copies: json['copies'] as int? ?? 1,
+      priority: json['priority'] as int? ?? 0,
+      status: json['status'] as String? ?? 'sent',
+    );
   }
 }

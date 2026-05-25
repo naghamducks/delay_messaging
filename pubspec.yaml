@@ -15,22 +15,19 @@ dependencies:
   intl: ^0.19.0
   permission_handler: ^11.3.1
   geolocator: ^12.0.0
-  bluetooth_low_energy: 6.0.0
-  android_intent_plus: ^5.0.0
+  bluetooth_low_energy: ^6.0.2   # 6.0.0 has broken Gradle config; 6.0.2+ fixes it
   shared_preferences: ^2.5.5
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   flutter_svg: ^2.0.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
-  cached_network_image: ^3.3.1
-  flutter_cache_manager: ^3.3.1
-  sqflite: ^2.3.3+1        # reads the MBTiles SQLite database
-  path_provider: ^2.1.4    # locates app's writable directory
-  flutter_map_cancellable_tile_provider: ^3.0.0  # clean base for custom provider
+  sqflite: ^2.3.3+1
+  path_provider: ^2.1.4
+  flutter_map_cancellable_tile_provider: ^3.0.0
   maplibre_gl: ^0.22.0
-  http: ^1.2.0          # only for the one-time regional map download
-  archive: ^3.6.1       # if you want to unpack compressed map data
+  http: ^1.2.0
+  archive: ^3.6.1
 
 dev_dependencies:
   flutter_test:
@@ -39,9 +36,9 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
 
 flutter:
-    uses-material-design: true
-    assets:
-    - assets/maps/ 
+  uses-material-design: true
+  assets:
+    - assets/maps/
     - assets/fonts/
     - assets/fonts/Noto Sans Regular/
 

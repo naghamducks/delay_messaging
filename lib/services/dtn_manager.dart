@@ -5,6 +5,7 @@ import 'package:delay_messenger/services/ble_transport_service.dart';
 import 'package:delay_messenger/services/node_identity.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
 import 'package:delay_messenger/services/transfer_service.dart';
+import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart';
 
 /// Callback type: notifies the UI layer that a message for this device arrived.
 typedef OnMessageDelivered = void Function(DtnMessage msg);
@@ -33,7 +34,10 @@ class DtnManager {
   void _wireBlCallbacks() {
     // Supply the HELLO packet builder (our node's state)
     ble.helloPacketBuilder = () async {
-      final myMsgIds = storage.getAllMessages().map((m) => m.id).toList();
+      final myMsgIds = [
+        ...storage.getMyMessages().map((m) => m.id),
+        ...storage.getRelayMessages().map((m) => m.id),
+      ];
       return {
         'type':   'HELLO',
         'nodeId': NodeIdentity.id,
@@ -91,6 +95,10 @@ class DtnManager {
       }
       await ble.sendMessage(peerId, msg);
       battery.consumeTx(msg.payload.length.toDouble());
+      // If we originated this message, mark it as relayed
+      if (msg.source == NodeIdentity.id) {
+        storage.updateMessageStatus(msg.id, 'relayed');
+      }
     }
 
     print('🤝 ===== PEER DONE =====\n');
@@ -114,20 +122,22 @@ class DtnManager {
     // Is this message for us?
     if (msg.destination == NodeIdentity.id) {
       print('✅ Delivered to this device: ${msg.id}');
-      onMessageDelivered?.call(msg);
-      // Store it so we can show it in the chat
-      storage.saveMessage(msg);
+      final delivered = msg.copyWith(status: 'delivered');
+      storage.saveMyMessage(delivered);
+      onMessageDelivered?.call(delivered);
       return;
     }
 
-    // Not for us — store and carry for later forwarding
-    storage.saveMessage(msg);
+    // Not for us — store in relay buffer and carry for later forwarding
+    storage.saveRelayMessage(msg);
     print('📦 Stored for relay: ${msg.id}');
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   List<DtnMessage> _loadAndExpire() {
-    final all = storage.getAllMessages();
+    final myMsgs = storage.getMyMessages();
+    final relayMsgs = storage.getRelayMessages();
+    final all = [...myMsgs, ...relayMsgs];
     final expired = all.where(_isExpired).toList();
     for (final msg in expired) {
       print('🗑 TTL expired, deleting: ${msg.id}');

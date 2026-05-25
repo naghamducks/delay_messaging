@@ -29,6 +29,13 @@ class BleTransportService {
   /// Custom hello packet builder. If null, uses default packet.
   Future<Map<String, dynamic>> Function()? helloPacketBuilder;
 
+  /// Called when a new BLE peripheral is discovered during scan.
+  /// Parameters: [peerId], [name], [rssi]
+  void Function(String peerId, String name, int rssi)? onDeviceDiscovered;
+
+  /// Called when a previously discovered peer disconnects or is lost.
+  void Function(String peerId)? onDeviceLost;
+
   // BLE Manager instances (v6: factory constructors, not .instance)
   final CentralManager _central = CentralManager();
   final PeripheralManager _peripheral = PeripheralManager();
@@ -266,6 +273,11 @@ class BleTransportService {
       if (!_discoveredPeers.containsKey(id)) {
         _discoveredPeers[id] = e.peripheral;
 
+        // Notify UI of any discovered device immediately (before service check)
+        final name = e.advertisement.name ?? 'DTN Node';
+        final rssi = e.rssi;
+        onDeviceDiscovered?.call(id, name, rssi);
+
         // v6: Manual service UUID filtering (no longer in startDiscovery)
         final advServiceUuids = e.advertisement.serviceUUIDs;
         final hasOurService = advServiceUuids.any(
@@ -289,6 +301,7 @@ class BleTransportService {
         _writeChars.remove(id);
         _notifyChars.remove(id);
         _rxBuffers.remove(id);
+        onDeviceLost?.call(id);
       }
     });
 

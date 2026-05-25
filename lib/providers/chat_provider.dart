@@ -26,7 +26,8 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Incoming message handler ───────────────────────────────────────────────
   void _onMessageDelivered(DtnMessage dtnMsg) {
-    // Determine if this is an SOS message (priority > 5)
+    // DtnManager already saved to my_messages with status 'delivered'.
+    // Just update UI state here.
     final isSOSMessage = dtnMsg.priority > 5;
 
     // Find or create a chat for this sender
@@ -90,7 +91,7 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Load persisted messages ────────────────────────────────────────────────
   void loadStoredMessages() {
-    final dtnMessages = _storage.getAllMessages();
+    final dtnMessages = _storage.getMyMessages();
     if (dtnMessages.isEmpty) {
       _initializeMockData();
       return;
@@ -100,11 +101,25 @@ class ChatProvider extends ChangeNotifier {
     for (final m in dtnMessages) {
       final chatId = m.source == NodeIdentity.id ? m.destination : m.source;
       final isSOSMessage = m.priority > 5;
-      
+
+      // Map status string to MessageStatus enum
+      MessageStatus uiStatus;
+      switch (m.status) {
+        case 'relayed':
+          uiStatus = MessageStatus.relayed;
+          break;
+        case 'delivered':
+          uiStatus = MessageStatus.delivered;
+          break;
+        case 'sent':
+        default:
+          uiStatus = MessageStatus.sent;
+      }
+
       // Extract location from payload if present
       double? latitude, longitude;
       String content = m.payload;
-      
+
       if (isSOSMessage && m.payload.contains('|')) {
         final parts = m.payload.split('|');
         if (parts.length >= 2) {
@@ -118,16 +133,16 @@ class ChatProvider extends ChangeNotifier {
           } catch (_) {}
         }
       }
-      
+
       byChat.putIfAbsent(chatId, () => []).add(Message(
-        id:          m.id,
-        content:     content,
-        timestamp:   m.createdAt,
-        isSentByMe:  m.source == NodeIdentity.id,
-        status:      MessageStatus.relayed,
+        id:           m.id,
+        content:      content,
+        timestamp:    m.createdAt,
+        isSentByMe:   m.source == NodeIdentity.id,
+        status:       uiStatus,
         isSOSMessage: isSOSMessage,
-        latitude:    latitude,
-        longitude:   longitude,
+        latitude:     latitude,
+        longitude:    longitude,
       ));
     }
 
@@ -181,7 +196,7 @@ class ChatProvider extends ChangeNotifier {
       ttl:         3600,
       priority:    isSOSMessage ? 10 : 5,
     );
-    _storage.saveMessage(dtnMsg);
+    _storage.saveMyMessage(dtnMsg);
 
     final uiMsg = Message(
       id:          messageId,
@@ -282,8 +297,7 @@ class ChatProvider extends ChangeNotifier {
     }).toList();
 
     // Also delete from Hive storage
-    for (final msg in _storage.getAllMessages()) {
-      if (msg.priority > 5) { // SOS messages have priority > 5
+    for (final msg in _storage.getAllMessages()) {      if (msg.priority > 5) { // SOS messages have priority > 5
         final age = now.difference(msg.createdAt);
         if (age.inHours >= 24) {
           _storage.deleteMessage(msg.id);
