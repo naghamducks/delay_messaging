@@ -1,14 +1,12 @@
 import 'package:delay_messenger/models/dtn_message.dart';
-import 'package:delay_messenger/services/battery_service.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
 import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart';
 
 class TransferService {
   final ProphetRoutingService routing;
-  final BatteryService battery;
   final ProphetBroadcastRoutingService sosRouting;
 
-  TransferService(this.routing, this.battery, this.sosRouting);
+  TransferService(this.routing, this.sosRouting);
 
   /// Decides which messages to forward to a peer.
   ///

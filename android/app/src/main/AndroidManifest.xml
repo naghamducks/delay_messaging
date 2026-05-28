@@ -4,7 +4,6 @@
     <uses-permission
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
-
     <uses-permission
         android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
@@ -14,11 +13,22 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 
-    <!-- ─────────── Location (FIXED: no maxSdkVersion) ─────────── -->
+    <!-- ─────────── Location ─────────── -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
-    <!-- ─────────── Optional but safe ─────────── -->
+    <!-- ─────────── Notifications (Android 13+) ─────────── -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Exact alarms needed for scheduled notifications -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- Keep CPU awake briefly to deliver notifications -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Allow notification to appear on lock screen / vibrate -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Full screen intent for SOS critical alerts -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+
+    <!-- ─────────── Network ─────────── -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -52,13 +62,27 @@
             </intent-filter>
         </activity>
 
+        <!-- flutter_local_notifications: receiver for scheduled/exact notifications -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false" />
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
     </application>
 
-    <!-- ─────────── Queries (for intent access) ─────────── -->
+    <!-- ─────────── Queries ─────────── -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

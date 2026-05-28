@@ -36,6 +36,14 @@ class BleTransportService {
   /// Called when a previously discovered peer disconnects or is lost.
   void Function(String peerId)? onDeviceLost;
 
+  /// Called when a peer's display name is learned from their HELLO packet.
+  /// Parameters: [peerId], [displayName]
+  void Function(String peerId, String displayName)? onPeerDisplayName;
+
+  /// Called when a peer's DTN node ID is learned from their HELLO packet.
+  /// Parameters: [blePeerId], [dtnNodeId]
+  void Function(String blePeerId, String dtnNodeId)? onPeerNodeId;
+
   // BLE Manager instances (v6: factory constructors, not .instance)
   final CentralManager _central = CentralManager();
   final PeripheralManager _peripheral = PeripheralManager();
@@ -70,6 +78,9 @@ class BleTransportService {
       _notifyStateSub;
 
   bool _isSetup = false;
+  bool _isAdvertising = false;
+bool _isScanning = false;
+bool _isConnecting = false;
 
   // ────────────────────────────────────────────────────────────────────────
   // Setup & Lifecycle
@@ -152,72 +163,89 @@ class BleTransportService {
   /// then advertises with the given [nodeId].
   ///
   /// Errors are silently caught; check connectivity via [connectedPeerIds].
-  Future<void> startAdvertising(String nodeId) async {
-    try {
-      await _peripheral.removeAllServices();
-
-      // v6: Use factory constructors (.mutable) with explicit permissions
-      final writeChar = GATTCharacteristic.mutable(
-        uuid: _kWriteCharUuid,
-        properties: [
-          GATTCharacteristicProperty.write,
-          GATTCharacteristicProperty.writeWithoutResponse,
-        ],
-        permissions: [
-          GATTCharacteristicPermission.write,
-          GATTCharacteristicPermission.writeEncrypted,
-        ],
-        descriptors: [],
-      );
-
-      final notifyChar = GATTCharacteristic.mutable(
-        uuid: _kNotifyCharUuid,
-        properties: [GATTCharacteristicProperty.notify],
-        permissions: [GATTCharacteristicPermission.read],
-        descriptors: [
-          // CCCD (Client Characteristic Configuration Descriptor)
-          GATTDescriptor.mutable(
-            uuid: UUID.fromString('00002902-0000-1000-8000-00805f9b34fb'),
-            permissions: [
-              GATTCharacteristicPermission.read,
-              GATTCharacteristicPermission.write,
-            ],
-          ),
-        ],
-      );
-
-      _myNotifyChar = notifyChar;
-
-      await _peripheral.addService(
-        GATTService(
-          uuid: _kServiceUuid,
-          isPrimary: true,
-          characteristics: [writeChar, notifyChar],
-          includedServices: [],
-        ),
-      );
-
-      await _peripheral.startAdvertising(
-        Advertisement(
-          name: 'DTN-$nodeId',
-          serviceUUIDs: [_kServiceUuid],
-        ),
-      );
-    } catch (_) {
-      // Silent failure; user can retry or check connectivity state
-    }
+ Future<void> startAdvertising(String nodeId) async {
+  if (_isAdvertising) {
+    print('⚠️ Already advertising');
+    return;
   }
+
+  try {
+    _isAdvertising = true;
+
+    await _peripheral.removeAllServices();
+
+    final writeChar = GATTCharacteristic.mutable(
+      uuid: _kWriteCharUuid,
+      properties: [
+        GATTCharacteristicProperty.write,
+        GATTCharacteristicProperty.writeWithoutResponse,
+      ],
+      permissions: [
+        GATTCharacteristicPermission.write,
+        GATTCharacteristicPermission.writeEncrypted,
+      ],
+      descriptors: [],
+    );
+
+    final notifyChar = GATTCharacteristic.mutable(
+      uuid: _kNotifyCharUuid,
+      properties: [GATTCharacteristicProperty.notify],
+      permissions: [GATTCharacteristicPermission.read],
+      descriptors: [
+        GATTDescriptor.mutable(
+          uuid: UUID.fromString(
+            '00002902-0000-1000-8000-00805f9b34fb',
+          ),
+          permissions: [
+            GATTCharacteristicPermission.read,
+            GATTCharacteristicPermission.write,
+          ],
+        ),
+      ],
+    );
+
+    _myNotifyChar = notifyChar;
+
+    await _peripheral.addService(
+      GATTService(
+        uuid: _kServiceUuid,
+        isPrimary: true,
+        characteristics: [writeChar, notifyChar],
+        includedServices: [],
+      ),
+    );
+
+    await _peripheral.startAdvertising(
+      Advertisement(
+        name: 'DTN-$nodeId',
+        serviceUUIDs: [_kServiceUuid],
+      ),
+    );
+
+    print('📡 Advertising started');
+  } catch (e) {
+    _isAdvertising = false;
+    print('❌ Advertising failed: $e');
+  }
+}
 
   /// Stops advertising and removes all services from the local GATT database.
-  Future<void> stopAdvertising() async {
-    try {
-      await _peripheral.stopAdvertising();
-      await _peripheral.removeAllServices();
-      _myNotifyChar = null;
-    } catch (_) {
-      // Errors are ignored; state is cleaned up regardless
-    }
+Future<void> stopAdvertising() async {
+  if (!_isAdvertising) return;
+
+  try {
+    await _peripheral.stopAdvertising();
+    await _peripheral.removeAllServices();
+
+    _myNotifyChar = null;
+
+    print('🛑 Advertising stopped');
+  } catch (e) {
+    print('❌ Stop advertising failed: $e');
+  } finally {
+    _isAdvertising = false;
   }
+}
 
   // ────────────────────────────────────────────────────────────────────────
   // Scanning (Central Role)
@@ -231,30 +259,47 @@ class BleTransportService {
   ///
   /// v6 note: [startDiscovery] no longer accepts [serviceUUIDs]; filtering
   /// is manual in the event listener.
-  Future<bool> startScan() async {
-    try {
-      // v6: state is a synchronous property, not async
-      final state = _central.state;
-      if (state != BluetoothLowEnergyState.poweredOn) {
-        return false;
-      }
+Future<bool> startScan() async {
+  if (_isScanning) {
+    print('⚠️ Already scanning');
+    return true;
+  }
 
-      // v6: startDiscovery() no longer takes serviceUUIDs parameter
-      await _central.startDiscovery();
-      return true;
-    } catch (_) {
+  try {
+    final state = _central.state;
+
+    if (state != BluetoothLowEnergyState.poweredOn) {
       return false;
     }
+
+    _isScanning = true;
+
+    await _central.startDiscovery();
+
+    print('🔍 Scan started');
+
+    return true;
+  } catch (e) {
+    _isScanning = false;
+    print('❌ Scan failed: $e');
+    return false;
   }
+}
 
   /// Stops scanning for peripherals.
-  Future<void> stopScan() async {
-    try {
-      await _central.stopDiscovery();
-    } catch (_) {
-      // Errors are ignored
-    }
+Future<void> stopScan() async {
+  if (!_isScanning) return;
+
+  try {
+    await _central.stopDiscovery();
+
+    print('🛑 Scan stopped');
+  } catch (e) {
+    print('❌ Stop scan failed: $e');
+  } finally {
+    _isScanning = false;
   }
+}
 
   // ────────────────────────────────────────────────────────────────────────
   // Central Event Listeners
@@ -286,9 +331,11 @@ class BleTransportService {
               _kServiceUuid.toString().toLowerCase(),
         );
 
-        if (hasOurService) {
-          _connectToPeer(e.peripheral);
-        }
+      if (hasOurService &&
+    !_writeChars.containsKey(id) &&
+    !_isConnecting) {
+  _connectToPeer(e.peripheral);
+}
       }
     });
 
@@ -365,59 +412,69 @@ class BleTransportService {
   /// - Discovers GATT services and characteristics
   /// - Subscribes to notify characteristic
   /// - Sends hello packet to peer
-  Future<void> _connectToPeer(Peripheral peripheral) async {
-    final id = peripheral.uuid.toString();
-    try {
-      await _central.connect(peripheral);
+ Future<void> _connectToPeer(Peripheral peripheral) async {
+  final id = peripheral.uuid.toString();
 
-      // v6: MTU is no longer negotiated automatically on Android;
-      // request it manually after connecting
-      if (Platform.isAndroid) {
-        try {
-          await _central.requestMTU(peripheral, mtu: 517);
-        } catch (_) {
-          // MTU request may fail; continue anyway
-        }
-      }
-
-      final services = await _central.discoverGATT(peripheral);
-
-      for (final svc in services) {
-        if (svc.uuid.toString().toLowerCase() !=
-            _kServiceUuid.toString().toLowerCase()) {
-          continue;
-        }
-
-        for (final char in svc.characteristics) {
-          final uuid = char.uuid.toString().toLowerCase();
-
-          if (uuid == _kWriteCharUuid.toString().toLowerCase()) {
-            _writeChars[id] = char;
-          }
-
-          if (uuid == _kNotifyCharUuid.toString().toLowerCase()) {
-            _notifyChars[id] = char;
-
-            // v6: setCharacteristicNotifyState takes (peripheral, characteristic:, state:)
-            try {
-              await _central.setCharacteristicNotifyState(
-                peripheral,
-                 char,
-                state: true,
-              );
-            } catch (_) {
-              // Subscription may fail; continue anyway
-            }
-          }
-        }
-      }
-
-      await _sendHello(id);
-    } catch (_) {
-      _discoveredPeers.remove(id);
-    }
+  if (_writeChars.containsKey(id)) {
+    print('⚠️ Already connected to $id');
+    return;
   }
 
+  if (_isConnecting) {
+    print('⚠️ Connection already in progress');
+    return;
+  }
+
+  _isConnecting = true;
+
+  try {
+    await _central.connect(peripheral);
+
+    if (Platform.isAndroid) {
+      try {
+        await _central.requestMTU(peripheral, mtu: 517);
+      } catch (_) {}
+    }
+
+    final services = await _central.discoverGATT(peripheral);
+
+    for (final svc in services) {
+      if (svc.uuid.toString().toLowerCase() !=
+          _kServiceUuid.toString().toLowerCase()) {
+        continue;
+      }
+
+      for (final char in svc.characteristics) {
+        final uuid = char.uuid.toString().toLowerCase();
+
+        if (uuid == _kWriteCharUuid.toString().toLowerCase()) {
+          _writeChars[id] = char;
+        }
+
+        if (uuid == _kNotifyCharUuid.toString().toLowerCase()) {
+          _notifyChars[id] = char;
+
+          try {
+            await _central.setCharacteristicNotifyState(
+              peripheral,
+              char,
+              state: true,
+            );
+          } catch (_) {}
+        }
+      }
+    }
+
+    await _sendHello(id);
+
+    print('✅ Connected to peer: $id');
+  } catch (e) {
+    _discoveredPeers.remove(id);
+    print('❌ Connection failed: $e');
+  } finally {
+    _isConnecting = false;
+  }
+}
   // ────────────────────────────────────────────────────────────────────────
   // Message Sending (Handshake & Data)
   // ────────────────────────────────────────────────────────────────────────
@@ -583,6 +640,14 @@ class BleTransportService {
             (k, v) => MapEntry(k as String, (v as num).toDouble()),
           ),
         );
+        final peerDtnNodeId = map['nodeId'] as String?;
+        if (peerDtnNodeId != null && peerDtnNodeId.isNotEmpty) {
+          onPeerNodeId?.call(peerId, peerDtnNodeId);
+        }
+        final peerDisplayName = map['displayName'] as String?;
+        if (peerDisplayName != null && peerDisplayName.isNotEmpty) {
+          onPeerDisplayName?.call(peerId, peerDisplayName);
+        }
         onPeerConnected?.call(
           peerId,
           preds,

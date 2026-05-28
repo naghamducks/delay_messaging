@@ -1,13 +1,11 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:delay_messenger/services/service_locator.dart';
+import 'package:delay_messenger/services/node_identity.dart';
 import '../providers/theme_provider.dart';
 
-/// Settings screen for app configuration
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -25,7 +23,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool         _notifMessages = true;
   bool         _notifRelay    = false;
   List<String> _sosContacts   = [];
-
   int _myCount    = 0;
   int _relayCount = 0;
 
@@ -43,9 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _notifMessages = prefs.getBool(_keyNotifMessages) ?? true;
       _notifRelay    = prefs.getBool(_keyNotifRelay)    ?? false;
       final raw = prefs.getString(_keySosContacts);
-      if (raw != null) {
-        _sosContacts = List<String>.from(jsonDecode(raw) as List);
-      }
+      if (raw != null) _sosContacts = List<String>.from(jsonDecode(raw) as List);
     });
   }
 
@@ -69,20 +64,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          // ── Identity ──────────────────────────────────────────────────
+          _sectionHeader(context, 'My Identity'),
+          ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('Display Name'),
+            subtitle: Text(NodeIdentity.displayNameOrId),
+            trailing: const Icon(Icons.edit_outlined),
+            onTap: _showEditDisplayNameDialog,
+          ),
+          ListTile(
+            leading: const Icon(Icons.fingerprint),
+            title: const Text('Node ID'),
+            subtitle: Text(
+              NodeIdentity.id,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+          const Divider(),
+
           // ── Appearance ────────────────────────────────────────────────
           _sectionHeader(context, 'Appearance'),
           SwitchListTile(
             title: const Text('Dark Mode'),
             subtitle: const Text('Use dark theme'),
             value: themeProvider.isDarkMode,
-            secondary: Icon(
-              themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode,
-            ),
+            secondary: Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode),
             onChanged: (_) => themeProvider.toggleTheme(),
           ),
           const Divider(),
@@ -94,31 +105,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Enable Relay Mode'),
             subtitle: const Text('Allow this device to relay messages'),
             value: _relayMode,
-            onChanged: (v) {
-              setState(() => _relayMode = v);
-              _setBool(_keyRelayMode, v);
-            },
+            onChanged: (v) { setState(() => _relayMode = v); _setBool(_keyRelayMode, v); },
           ),
           ListTile(
             leading: const Icon(Icons.storage),
             title: const Text('Message Storage'),
-            subtitle: Text(
-              'My messages: $_myCount   •   Relay buffer: $_relayCount',
-            ),
+            subtitle: Text('My messages: $_myCount   •   Relay buffer: $_relayCount'),
             trailing: IconButton(
               icon: const Icon(Icons.refresh),
-              tooltip: 'Refresh counts',
               onPressed: _refreshStorageCounts,
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.network_check),
-            title: const Text('Network Priority'),
-            subtitle: const Text('WiFi Direct, Bluetooth, LoRa'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to network priority settings
-            },
           ),
           const Divider(),
 
@@ -127,22 +123,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.notifications),
             title: const Text('Message Notifications'),
-            subtitle: const Text('Notify when messages are received'),
             value: _notifMessages,
-            onChanged: (v) {
-              setState(() => _notifMessages = v);
-              _setBool(_keyNotifMessages, v);
-            },
+            onChanged: (v) { setState(() => _notifMessages = v); _setBool(_keyNotifMessages, v); },
           ),
           SwitchListTile(
             secondary: const Icon(Icons.sync),
             title: const Text('Relay Notifications'),
-            subtitle: const Text('Notify when relaying messages'),
             value: _notifRelay,
-            onChanged: (v) {
-              setState(() => _notifRelay = v);
-              _setBool(_keyNotifRelay, v);
-            },
+            onChanged: (v) { setState(() => _notifRelay = v); _setBool(_keyNotifRelay, v); },
           ),
           const Divider(),
 
@@ -155,7 +143,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               trailing: IconButton(
                 icon: const Icon(Icons.remove_circle_outline),
                 color: Colors.red,
-                tooltip: 'Remove',
                 onPressed: () {
                   setState(() => _sosContacts.removeAt(entry.key));
                   _saveSosContacts();
@@ -166,14 +153,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.emergency, color: Colors.red),
             title: const Text('SOS Contacts'),
-            subtitle: Text(
-              _sosContacts.isEmpty
-                  ? 'No emergency contacts configured'
-                  : '${_sosContacts.length} contact(s)',
-            ),
+            subtitle: Text(_sosContacts.isEmpty
+                ? 'No emergency contacts configured'
+                : '${_sosContacts.length} contact(s)'),
             trailing: IconButton(
               icon: const Icon(Icons.add),
-              tooltip: 'Add SOS contact',
               onPressed: _showAddSosContactDialog,
             ),
           ),
@@ -192,14 +176,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => showLicensePage(context: context),
           ),
-          ListTile(
-            leading: const Icon(Icons.help),
-            title: const Text('Help & Documentation'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to help
-            },
-          ),
         ],
       ),
     );
@@ -208,14 +184,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _sectionHeader(BuildContext context, String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
+      child: Text(title,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              )),
+    );
+  }
+
+  Future<void> _showEditDisplayNameDialog() async {
+    final controller = TextEditingController(text: NodeIdentity.displayName ?? '');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your Display Name'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'e.g. Ahmed, Field Unit 2',
+          ),
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Save')),
+        ],
       ),
     );
+    if (confirmed == true && controller.text.trim().isNotEmpty) {
+      await NodeIdentity.setDisplayName(controller.text.trim());
+      setState(() {});
+    }
   }
 
   Future<void> _showAddSosContactDialog() async {
@@ -226,25 +227,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Add SOS Contact'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'Node ID',
-            hintText: 'e.g. node-alpha',
-          ),
+          decoration: const InputDecoration(labelText: 'Node ID', hintText: 'e.g. node_8spm1s5t'),
           autofocus: true,
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Add'),
-          ),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Add')),
         ],
       ),
     );
-
     if (confirmed == true && controller.text.trim().isNotEmpty) {
       final nodeId = controller.text.trim();
       if (!_sosContacts.contains(nodeId)) {

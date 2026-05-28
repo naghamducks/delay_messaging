@@ -8,7 +8,9 @@ import 'chat_screen.dart';
 
 /// Displays the list of conversations (contacts) in a messaging app style.
 class ConversationsScreen extends StatelessWidget {
-  const ConversationsScreen({super.key});
+  /// Called when the user taps "Find nearby devices" from the empty state.
+  final VoidCallback? onFindNearbyDevices;
+  const ConversationsScreen({super.key, this.onFindNearbyDevices});
 
   @override
   Widget build(BuildContext context) {
@@ -194,18 +196,19 @@ class ConversationsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Start a new conversation by tapping the button below. Your messages are stored locally and work even offline.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
+              'Go to the Location tab, tap a nearby device, and start a conversation.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.7)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
-              icon: const Icon(Icons.add_comment_outlined),
-              label: const Text('Start a conversation'),
-              onPressed: () => _showCreateChatDialog(context),
+              icon: const Icon(Icons.sensors),
+              label: const Text('Find nearby devices'),
+              onPressed: onFindNearbyDevices ?? () => _showCreateChatDialog(context),
             ),
           ],
         ),
@@ -215,39 +218,17 @@ class ConversationsScreen extends StatelessWidget {
 
   void _showCreateChatDialog(BuildContext context) {
     final nameController = TextEditingController();
-    final nodeIdController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
 
     showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('New conversation'),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Contact name',
-                    hintText: 'e.g. Team Alpha',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: nodeIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'Peer Node ID',
-                    hintText: 'e.g. node-alpha',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Peer Node ID is required' : null,
-                ),
-              ],
+          content: TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              labelText: 'Contact name',
+              hintText: 'e.g. Team Alpha',
             ),
           ),
           actions: [
@@ -257,17 +238,16 @@ class ConversationsScreen extends StatelessWidget {
             ),
             FilledButton(
               onPressed: () {
-                if (!formKey.currentState!.validate()) return;
-                final name   = nameController.text.trim();
-                final nodeId = nodeIdController.text.trim();
+                final name = nameController.text.trim();
+                if (name.isEmpty) return;
                 Navigator.pop(context);
                 final provider =
                     Provider.of<ChatProvider>(context, listen: false);
                 final newChat = Chat(
-                  id:              nodeId,
-                  name:            name,
-                  nodeId:          nodeId,
-                  messages:        [],
+                  id: 'chat_${DateTime.now().millisecondsSinceEpoch}',
+                  name: name,
+                  nodeId: name.toLowerCase().replaceAll(' ', '_'),
+                  messages: [],
                   lastMessageTime: DateTime.now(),
                 );
                 provider.addChat(newChat);

@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math';
 import 'package:delay_messenger/models/dtn_message.dart';
 import 'package:delay_messenger/services/service_locator.dart';
@@ -19,9 +20,12 @@ class ChatProvider extends ChangeNotifier {
   Chat? get currentChat   => _currentChat;
 
   ChatProvider() {
-    // Wire up the delivered-message callback
-    _dtnManager.onMessageDelivered = _onMessageDelivered;
-    loadStoredMessages();
+    _ensureNamesLoaded().then((_) => loadStoredMessages());
+  }
+
+  /// Called by DTNProvider when a new peer name is learned — invalidates cache.
+  static void invalidatePeerNamesCache() {
+    _cachedPeerNames = null;
   }
 
   // ── Incoming message handler ───────────────────────────────────────────────
@@ -35,9 +39,10 @@ class ChatProvider extends ChangeNotifier {
     var chatIndex  = _chats.indexWhere((c) => c.nodeId == senderId);
 
     if (chatIndex == -1) {
+      final name = _peerDisplayName(senderId);
       _chats.add(Chat(
-        id:              'chat_${DateTime.now().millisecondsSinceEpoch}',
-        name:            'Node $senderId',
+        id:              senderId,
+        name:            name,
         nodeId:          senderId,
         messages:        [],
         lastMessageTime: DateTime.now(),
@@ -149,8 +154,8 @@ class ChatProvider extends ChangeNotifier {
     _chats = byChat.entries.map((e) {
       final msgs = e.value..sort((a, b) => a.timestamp.compareTo(b.timestamp));
       return Chat(
-        id:              'chat_${DateTime.now().millisecondsSinceEpoch}',
-        name:            'Node ${e.key.substring(0, min(10, e.key.length))}',
+        id:              e.key,
+        name:            _peerDisplayName(e.key),
         nodeId:          e.key,
         messages:        msgs,
         lastMessageTime: msgs.last.timestamp,
@@ -229,9 +234,126 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  /// Called from main.dart so both UI update and notification fire together.
+  void handleDeliveredMessage(DtnMessage dtnMsg) => _onMessageDelivered(dtnMsg);
+
+  /// Send an SOS broadcast to ALL connected peers.
+  /// Behaves identically to a normal SOS — same location encoding, same
+  /// priority — and immediately appears on the SOS tab with a location pin.
+  Future<void> sendSosToAll(String content) async {
+    double? latitude, longitude;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      latitude  = pos.latitude;
+      longitude = pos.longitude;
+    } catch (e) {
+      print('❌ Failed to get location for SOS broadcast: $e');
+    }
+
+    final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
+    final now       = DateTime.now();
+
+    String payloadToSend = content;
+    if (latitude != null && longitude != null) {
+      payloadToSend = '$content|$latitude,$longitude';
+    }
+
+    final dtnMsg = DtnMessage(
+      id:          messageId,
+      source:      NodeIdentity.id,
+      destination: 'BROADCAST',
+      payload:     payloadToSend,
+      createdAt:   now,
+      ttl:         86400,
+      priority:    10,
+    );
+    _storage.saveMyMessage(dtnMsg);
+
+    // Build UI message so it appears immediately on the SOS tab
+    final uiMsg = Message(
+      id:           messageId,
+      content:      content,
+      timestamp:    now,
+      isSentByMe:   true,
+      status:       MessageStatus.sent,
+      isSOSMessage: true,
+      latitude:     latitude,
+      longitude:    longitude,
+    );
+
+    // Add to a dedicated SOS Broadcast chat so it shows in the SOS tab
+    const broadcastChatId = 'sos_broadcast';
+    final existingIdx = _chats.indexWhere((c) => c.id == broadcastChatId);
+    if (existingIdx == -1) {
+      _chats.add(Chat(
+        id:              broadcastChatId,
+        name:            'SOS Broadcast',
+        nodeId:          broadcastChatId,
+        messages:        [uiMsg],
+        lastMessageTime: now,
+      ));
+    } else {
+      final updated = List<Message>.from(_chats[existingIdx].messages)
+        ..add(uiMsg);
+      _chats[existingIdx] = _chats[existingIdx].copyWith(
+        messages:        updated,
+        lastMessageTime: now,
+      );
+    }
+
+    // Fire immediately to every connected peer
+    for (final peerId in ServiceLocator.ble.connectedPeerIds) {
+      try {
+        await ServiceLocator.ble.sendMessage(peerId, dtnMsg);
+      } catch (_) {}
+    }
+
+    notifyListeners();
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   void setCurrentChat(Chat chat) {
     _currentChat = chat;
+    notifyListeners();
+  }
+
+  /// Cache of peerId → display name loaded from SharedPreferences.
+  static Map<String, String>? _cachedPeerNames;
+
+  static Future<void> _ensureNamesLoaded() async {
+    if (_cachedPeerNames != null) return;
+    _cachedPeerNames = {};
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList('dtn_peer_names') ?? [];
+    for (final entry in raw) {
+      final sep = entry.indexOf('|');
+      if (sep > 0) {
+        _cachedPeerNames![entry.substring(0, sep)] = entry.substring(sep + 1);
+      }
+    }
+  }
+
+  String _peerDisplayName(String peerId) {
+    // Try in-memory cache first (populated when DTNProvider fires onPeerDisplayName)
+    final cached = _cachedPeerNames?[peerId];
+    if (cached != null && cached.isNotEmpty) return cached;
+    // Fallback to truncated ID
+    try {
+      return 'Node ${peerId.substring(0, min(10, peerId.length))}';
+    } catch (_) {
+      return peerId;
+    }
+  }
+
+  void updateChatName(String nodeId, String displayName) {
+    final i = _chats.indexWhere((c) => c.id == nodeId || c.nodeId == nodeId);
+    if (i == -1) return;
+    _chats[i] = _chats[i].copyWith(name: displayName);
+    if (_currentChat?.id == nodeId || _currentChat?.nodeId == nodeId) {
+      _currentChat = _chats[i];
+    }
     notifyListeners();
   }
 
@@ -244,8 +366,11 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void addChat(Chat chat) {
-    _chats.add(chat);
-    notifyListeners();
+    final exists = _chats.any((c) => c.id == chat.id || c.nodeId == chat.nodeId);
+    if (!exists) {
+      _chats.add(chat);
+      notifyListeners();
+    }
   }
 
   void _simulateStatusProgression(Message msg) async {

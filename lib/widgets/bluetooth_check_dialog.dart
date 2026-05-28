@@ -1,13 +1,27 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 
-/// Dialog to check and prompt for Bluetooth enablement.
-///
-/// Uses only [permission_handler] and [bluetooth_low_energy] — no
-/// android_intent_plus dependency needed.
 class BluetoothCheckDialog {
+
+  // ── Platform channel for opening BT settings directly ────────────────────
+  static const _channel = MethodChannel('com.example.delay_messaging/settings');
+
+  /// Opens the Bluetooth settings panel directly (not just app settings).
+  static Future<void> _openBluetoothSettings() async {
+    if (Platform.isAndroid) {
+      try {
+        await _channel.invokeMethod('openBluetoothSettings');
+        return;
+      } catch (_) {
+        // Fall through to openAppSettings if channel not implemented yet
+      }
+    }
+    await openAppSettings();
+  }
+
   // ── Permission helpers ────────────────────────────────────────────────────
 
   static Future<bool> _hasPermissions() async {
@@ -20,8 +34,7 @@ class BluetoothCheckDialog {
              advertise.isGranted && location.isGranted;
     }
     if (Platform.isIOS) {
-      final bt = await Permission.bluetooth.status;
-      return bt.isGranted;
+      return (await Permission.bluetooth.status).isGranted;
     }
     return false;
   }
@@ -34,16 +47,10 @@ class BluetoothCheckDialog {
         Permission.bluetoothAdvertise,
         Permission.location,
       ].request();
-      print('  Permission.location: ${results[Permission.location]}');
-      print('  Permission.bluetooth: ${results[Permission.bluetoothScan]}');
-      print('  Permission.bluetoothScan: ${results[Permission.bluetoothScan]}');
-      print('  Permission.bluetoothAdvertise: ${results[Permission.bluetoothAdvertise]}');
-      print('  Permission.bluetoothConnect: ${results[Permission.bluetoothConnect]}');
       return results.values.every((s) => s.isGranted);
     }
     if (Platform.isIOS) {
-      final result = await Permission.bluetooth.request();
-      return result.isGranted;
+      return (await Permission.bluetooth.request()).isGranted;
     }
     return false;
   }
@@ -53,15 +60,8 @@ class BluetoothCheckDialog {
     return central.state == BluetoothLowEnergyState.poweredOn;
   }
 
-  /// Opens Bluetooth settings (platform-appropriate).
-  /// Uses [openAppSettings] from permission_handler — no android_intent_plus needed.
-  static Future<void> _openBluetoothSettings() async {
-    await openAppSettings();
-  }
-
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /// Show Bluetooth status check dialog if anything is missing.
   static Future<void> show(BuildContext context) async {
     final hasPermissions = await _hasPermissions();
     print('Bluetooth permissions granted: $hasPermissions');
@@ -83,20 +83,15 @@ class BluetoothCheckDialog {
     }
   }
 
-  /// Returns true if permissions are granted and Bluetooth is on.
   static Future<bool> checkAndPrompt(BuildContext context) async {
-    final hasPermissions = await _hasPermissions();
-    if (!hasPermissions) {
+    if (!await _hasPermissions()) {
       if (context.mounted) _showPermissionDialog(context);
       return false;
     }
-
-    final isEnabled = await _isBluetoothOn();
-    if (!isEnabled) {
+    if (!await _isBluetoothOn()) {
       if (context.mounted) _showBluetoothSettingsDialog(context);
       return false;
     }
-
     return true;
   }
 
@@ -110,8 +105,8 @@ class BluetoothCheckDialog {
         icon: const Icon(Icons.bluetooth_disabled, size: 64, color: Colors.orange),
         title: const Text('Bluetooth Permissions Required'),
         content: const Text(
-          'This app needs Bluetooth permissions to discover and connect to nearby '
-          'DTN devices.\n\nPlease grant the necessary permissions to continue.',
+          'ReachOut needs Bluetooth permissions to discover and connect to '
+          'nearby devices.\n\nPlease grant the necessary permissions to continue.',
         ),
         actions: [
           TextButton(
@@ -126,11 +121,7 @@ class BluetoothCheckDialog {
               Navigator.pop(ctx);
               final granted = await _requestPermissions();
               if (!context.mounted) return;
-              if (granted) {
-                show(context);
-              } else {
-                _showPermissionWarningDialog(context);
-              }
+              granted ? show(context) : _showPermissionWarningDialog(context);
             },
             child: const Text('Grant Permissions'),
           ),
@@ -147,8 +138,8 @@ class BluetoothCheckDialog {
         icon: const Icon(Icons.bluetooth_disabled, size: 64, color: Colors.red),
         title: const Text('Bluetooth is Off'),
         content: const Text(
-          'DTN Messenger requires Bluetooth to discover and communicate with '
-          'nearby devices.\n\nPlease enable Bluetooth in your device settings.',
+          'ReachOut requires Bluetooth to discover and communicate with '
+          'nearby devices.\n\nPlease enable Bluetooth to continue.',
         ),
         actions: [
           TextButton(
@@ -159,6 +150,11 @@ class BluetoothCheckDialog {
             onPressed: () async {
               Navigator.pop(ctx);
               await _openBluetoothSettings();
+              // Re-check after returning from settings
+              if (context.mounted) {
+                await Future.delayed(const Duration(milliseconds: 500));
+                show(context);
+              }
             },
             child: const Text('Open Bluetooth Settings'),
           ),
@@ -175,10 +171,8 @@ class BluetoothCheckDialog {
         icon: const Icon(Icons.warning, size: 64, color: Colors.red),
         title: const Text('Permissions Required'),
         content: const Text(
-          'Bluetooth and location permissions are required for DTN Messenger '
-          'to function.\n\nWithout these permissions, the app cannot discover '
-          'or communicate with nearby devices.\n\nYou will need to enable them '
-          'in Settings to use this app.',
+          'Bluetooth and location permissions are required for ReachOut to '
+          'function.\n\nPlease enable them in Settings.',
         ),
         actions: [
           TextButton(

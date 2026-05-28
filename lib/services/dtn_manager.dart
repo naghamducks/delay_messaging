@@ -1,6 +1,5 @@
 import 'package:delay_messenger/models/dtn_message.dart';
 import 'package:delay_messenger/services/DTN_Storage_Service.dart';
-import 'package:delay_messenger/services/battery_service.dart';
 import 'package:delay_messenger/services/ble_transport_service.dart';
 import 'package:delay_messenger/services/node_identity.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
@@ -9,22 +8,27 @@ import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart'
 
 /// Callback type: notifies the UI layer that a message for this device arrived.
 typedef OnMessageDelivered = void Function(DtnMessage msg);
+typedef OnMessageRelayed  = void Function(DtnMessage msg, String toPeerId);
 
 class DtnManager {
   final DtnStorageService storage;
   final ProphetRoutingService routing;
   final TransferService transfer;
-  final BatteryService battery;
   final BleTransportService ble;
 
-  /// Set by ChatProvider so the UI can display delivered messages.
+  /// Set by the UI layer to display delivered messages.
   OnMessageDelivered? onMessageDelivered;
+
+  /// Set by the UI layer to show relay notifications.
+  OnMessageRelayed? onMessageRelayed;
+
+  /// Maps BLE peer UUID → DTN node ID (learned from HELLO packets)
+  final Map<String, String> _peerDtnIds = {};
 
   DtnManager({
     required this.storage,
     required this.routing,
     required this.transfer,
-    required this.battery,
     required this.ble,
   }) {
     _wireBlCallbacks();
@@ -39,11 +43,18 @@ class DtnManager {
         ...storage.getRelayMessages().map((m) => m.id),
       ];
       return {
-        'type':   'HELLO',
-        'nodeId': NodeIdentity.id,
-        'preds':  Map<String, double>.from(routing.preds),
-        'msgIds': myMsgIds,
+        'type':        'HELLO',
+        'nodeId':      NodeIdentity.id,
+        'displayName': NodeIdentity.displayNameOrId,
+        'preds':       Map<String, double>.from(routing.preds),
+        'msgIds':      myMsgIds,
       };
+    };
+
+    // Store BLE UUID → DTN nodeId mapping from HELLO packets
+    ble.onPeerNodeId = (blePeerId, dtnNodeId) {
+      _peerDtnIds[blePeerId] = dtnNodeId;
+      print('🔗 Peer $blePeerId is DTN node: $dtnNodeId');
     };
 
     // Called when a HELLO arrives from a peer
@@ -56,18 +67,24 @@ class DtnManager {
       _handleIncomingMessage(msg);
     };
   }
-
+String _resolveNodeId(String id) {
+  return _peerDtnIds.values.contains(id)
+      ? id
+      : id; // later you can expand mapping logic
+}
   // ── Core DTN flow ─────────────────────────────────────────────────────────
   Future<void> onPeerConnected(
     String peerId,
     Map<String, double> peerPreds,
     List<String> peerMessageIds,
   ) async {
-    print('\n🤝 ===== PEER CONNECTION: $peerId =====');
+    // Use DTN node ID for routing if known, otherwise BLE UUID
+    final routingId = _peerDtnIds[peerId] ?? peerId;
+    print('\n🤝 ===== PEER CONNECTION: $peerId (DTN: $routingId) =====');
 
-    // 1. Update PRoPHET probabilities
-    routing.updateDeliveryPred(peerId);
-    routing.updateTransitivePreds(peerId, peerPreds);
+    // 1. Update PRoPHET probabilities using the DTN node ID
+    routing.updateDeliveryPred(routingId);
+    routing.updateTransitivePreds(routingId, peerPreds);
 
     // 2. Load and expire messages
     final allMessages = _loadAndExpire();
@@ -81,7 +98,7 @@ class DtnManager {
     final toSend = transfer.decideMessagesToSend(
       candidates,
       peerMessageIds,
-      peerId,
+      routingId,  // use DTN nodeId, not BLE UUID
       peerPreds,
     );
 
@@ -89,15 +106,15 @@ class DtnManager {
 
     // 4. Send
     for (final msg in toSend) {
-      if (!battery.isAlive()) {
-        print('🔋 Battery dead — stopping');
-        break;
-      }
+   
       await ble.sendMessage(peerId, msg);
-      battery.consumeTx(msg.payload.length.toDouble());
       // If we originated this message, mark it as relayed
       if (msg.source == NodeIdentity.id) {
         storage.updateMessageStatus(msg.id, 'relayed');
+      }
+      // Fire relay notification for messages we're carrying for others
+      if (msg.source != NodeIdentity.id) {
+        onMessageRelayed?.call(msg, peerId);
       }
     }
 
@@ -107,20 +124,23 @@ class DtnManager {
   void _handleIncomingMessage(DtnMessage msg) {
     print('📥 Incoming: ${msg.id} → ${msg.destination} from ${msg.source}');
 
-    // Check TTL first
     if (_isExpired(msg)) {
       print('🗑 Expired on arrival: ${msg.id}');
       return;
     }
 
-    // Deduplicate
     if (storage.hasMessage(msg.id)) {
       print('⏭ Already have: ${msg.id}');
       return;
     }
 
-    // Is this message for us?
-    if (msg.destination == NodeIdentity.id) {
+    // Delivered to us if destination matches our DTN node ID.
+    // Also accept if sender mistakenly used our BLE UUID (pre-fix messages).
+  final isForMe = msg.destination == NodeIdentity.id;
+
+    print('🔍 isForMe=$isForMe  dest=${msg.destination}  myId=${NodeIdentity.id}');
+
+    if (isForMe) {
       print('✅ Delivered to this device: ${msg.id}');
       final delivered = msg.copyWith(status: 'delivered');
       storage.saveMyMessage(delivered);
@@ -152,13 +172,40 @@ class DtnManager {
   }
 
   // ── BLE lifecycle (call from UI) ──────────────────────────────────────────
+// ── BLE lifecycle (call from UI) ──────────────────────────────────────────
+
+bool _bleStarted = false;
+
 Future<void> startBle() async {
-  await ble.startAdvertising(NodeIdentity.id);
-  await ble.startScan();
+  if (_bleStarted) {
+    print('⚠️ BLE already started');
+    return;
+  }
+
+  try {
+    _bleStarted = true;
+
+    await ble.startAdvertising(NodeIdentity.displayNameOrId);
+    await ble.startScan();
+
+    print('✅ BLE started');
+  } catch (e) {
+    _bleStarted = false;
+    print('❌ Failed to start BLE: $e');
+  }
 }
 
 Future<void> stopBle() async {
-  await ble.stopAdvertising();
-  await ble.stopScan();
+  if (!_bleStarted) return;
+
+  try {
+    await ble.stopAdvertising();
+    await ble.stopScan();
+
+    print('🛑 BLE stopped');
+  } finally {
+    _bleStarted = false;
+  }
 }
+
 }

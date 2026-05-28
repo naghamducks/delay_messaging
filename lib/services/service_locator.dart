@@ -5,7 +5,6 @@ import 'package:delay_messenger/services/DTN_Storage_Service.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
 import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart';
 import 'package:delay_messenger/services/transfer_service.dart';
-import 'package:delay_messenger/services/battery_service.dart';
 import 'package:delay_messenger/services/node_identity.dart';
 
 /// Single source of truth for all singleton services.
@@ -16,7 +15,6 @@ class ServiceLocator {
   static late final DtnStorageService storage;
   static late final ProphetRoutingService routing;
   static late final ProphetBroadcastRoutingService sosRouting;
-  static late final BatteryService battery;
   static late final TransferService transfer;
   static late final BleTransportService ble;
   static late final DtnManager dtnManager;
@@ -31,16 +29,17 @@ class ServiceLocator {
     storage    = DtnStorageService();
     routing    = ProphetRoutingService();
     sosRouting = ProphetBroadcastRoutingService();
-    battery    = BatteryService();
-    transfer   = TransferService(routing, battery, sosRouting);
+    transfer   = TransferService(routing, sosRouting);
     ble        = BleTransportService();
     dtnManager = DtnManager(
       storage:  storage,
       routing:  routing,
       transfer: transfer,
-      battery:  battery,
       ble:      ble,
     );
-     await ble.setup(); // ← add this
+    await ble.setup();
+    // Advertise with display name so peers see it immediately on discovery
+    await ble.startAdvertising(NodeIdentity.displayNameOrId);
+    await ble.startScan();
   }
 }
