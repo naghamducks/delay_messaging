@@ -7,139 +7,134 @@ import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 
 import '../models/dtn_message.dart';
 
-/// Service UUIDs used for BLE discovery and advertisement
-final _kServiceUuid = UUID.fromString('12345678-1234-1234-1234-1234567890ab');
-final _kWriteCharUuid = UUID.fromString('12345678-1234-1234-1234-1234567890ac');
+final _kServiceUuid    = UUID.fromString('12345678-1234-1234-1234-1234567890ab');
+final _kWriteCharUuid  = UUID.fromString('12345678-1234-1234-1234-1234567890ac');
 final _kNotifyCharUuid = UUID.fromString('12345678-1234-1234-1234-1234567890ad');
 
-/// BLE transport layer for Delay-Tolerant Networking (DTN) messages.
-///
-/// Provides bidirectional communication between BLE central and peripheral devices,
-/// handling both discovery, connection, and message exchange over GATT characteristics.
-/// Compatible with bluetooth_low_energy v6.x API.
+class _PeerState {
+  bool writeReady  = false;
+  bool notifyReady = false;
+  bool helloSent   = false;
+
+  bool get isReady => writeReady || notifyReady;
+}
+
 class BleTransportService {
-  /// Callback when a peer connects and sends its hello packet.
-  /// Parameters: [peerId], [peerPreds], [peerMsgIds]
-  void Function(String peerId, Map<String, double> peerPreds,
-      List<String> peerMsgIds)? onPeerConnected;
 
-  /// Callback when a DTN message is received.
-  void Function(DtnMessage msg)? onMessageReceived;
+  // ── Callbacks ──────────────────────────────────────────────────────────────
 
-  /// Custom hello packet builder. If null, uses default packet.
-  Future<Map<String, dynamic>> Function()? helloPacketBuilder;
-
-  /// Called when a new BLE peripheral is discovered during scan.
-  /// Parameters: [peerId], [name], [rssi]
+  void Function(String peerId, Map<String, double> peerPreds, List<String> peerMsgIds)? onPeerConnected;
+  void Function(DtnMessage msg)?                       onMessageReceived;
+  Future<Map<String, dynamic>> Function()?             helloPacketBuilder;
   void Function(String peerId, String name, int rssi)? onDeviceDiscovered;
+  void Function(String peerId)?                        onDeviceLost;
+  void Function(String peerId, String displayName)?    onPeerDisplayName;
 
-  /// Called when a previously discovered peer disconnects or is lost.
-  void Function(String peerId)? onDeviceLost;
+  /// Fires when a HELLO packet is received from a peer, providing the mapping:
+  ///   blePeerId (UUID as seen by our CentralManager) → dtnNodeId (peer's stable ID).
+  ///
+  /// ⚠️  Multiple services need this event. Always CHAIN onto the existing handler:
+  ///
+  ///   final prev = ble.onPeerNodeId;
+  ///   ble.onPeerNodeId = (blePeerId, dtnNodeId) {
+  ///     prev?.call(blePeerId, dtnNodeId);
+  ///     // your logic here
+  ///   };
+  void Function(String blePeerId, String dtnNodeId)?  onPeerNodeId;
 
-  /// Called when a peer's display name is learned from their HELLO packet.
-  /// Parameters: [peerId], [displayName]
-  void Function(String peerId, String displayName)? onPeerDisplayName;
+  /// Fired when we learn our own BLE UUID as seen by a connected peer.
+  void Function(String myBleUuid)? onMyBleIdLearned;
 
-  /// Called when a peer's DTN node ID is learned from their HELLO packet.
-  /// Parameters: [blePeerId], [dtnNodeId]
-  void Function(String blePeerId, String dtnNodeId)? onPeerNodeId;
+  // ── BLE managers ───────────────────────────────────────────────────────────
 
-  // BLE Manager instances (v6: factory constructors, not .instance)
-  final CentralManager _central = CentralManager();
+  final CentralManager    _central    = CentralManager();
   final PeripheralManager _peripheral = PeripheralManager();
 
-  // Connection state maps
-  final Map<String, GATTCharacteristic> _writeChars = {};
-  final Map<String, GATTCharacteristic> _notifyChars = {};
-  final Map<String, Peripheral> _discoveredPeers = {};
-  final Map<String, Central> _connectedCentrals = {};
+  // ── State ──────────────────────────────────────────────────────────────────
 
-  // Receive buffer for incomplete frames
-  final Map<String, StringBuffer> _rxBuffers = {};
+  final Map<String, GATTCharacteristic> _writeChars        = {};
+  final Map<String, GATTCharacteristic> _notifyChars       = {};
+  final Map<String, Peripheral>         _discoveredPeers   = {};
+  final Map<String, Central>            _connectedCentrals = {};
+  final Map<String, StringBuffer>       _rxBuffers         = {};
 
-  // Our own notify characteristic (when in peripheral role)
+  // FIX: was referenced but never declared
+  final Map<String, _PeerState>         _peerState         = {};
+
   GATTCharacteristic? _myNotifyChar;
 
-  // Stream subscriptions
-  late final StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>
-      _centralStateSub;
-  late final StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>
-      _peripheralStateSub;
-  late final StreamSubscription<DiscoveredEventArgs> _discoverySub;
-  late final StreamSubscription<PeripheralConnectionStateChangedEventArgs>
-      _centralConnSub;
-  late final StreamSubscription<GATTCharacteristicNotifiedEventArgs>
-      _notifiedSub;
-  late final StreamSubscription<CentralConnectionStateChangedEventArgs>
-      _peripheralConnSub;
-  late final StreamSubscription<GATTCharacteristicWriteRequestedEventArgs>
-      _writeRequestSub;
-  late final StreamSubscription<GATTCharacteristicNotifyStateChangedEventArgs>
-      _notifyStateSub;
+  // FIX: was called but never declared — completes when advertising is ready
+  Completer<void>? _advertisingReady;
 
-  bool _isSetup = false;
+  late final StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>      _centralStateSub;
+  late final StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>      _peripheralStateSub;
+  late final StreamSubscription<DiscoveredEventArgs>                           _discoverySub;
+  late final StreamSubscription<PeripheralConnectionStateChangedEventArgs>     _centralConnSub;
+  late final StreamSubscription<GATTCharacteristicNotifiedEventArgs>           _notifiedSub;
+  late final StreamSubscription<CentralConnectionStateChangedEventArgs>        _peripheralConnSub;
+  late final StreamSubscription<GATTCharacteristicWriteRequestedEventArgs>     _writeRequestSub;
+  late final StreamSubscription<GATTCharacteristicNotifyStateChangedEventArgs> _notifyStateSub;
+
+  bool _isSetup       = false;
   bool _isAdvertising = false;
-bool _isScanning = false;
-bool _isConnecting = false;
+  bool _isScanning    = false;
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Setup & Lifecycle
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Peer-ready helpers ─────────────────────────────────────────────────────
 
-  /// Initializes the BLE transport service.
-  ///
-  /// Sets up both central and peripheral managers, registers state listeners,
-  /// and waits for Bluetooth to be powered on. Must be called before using
-  /// advertising or scanning.
+  void _markReady(String id, {bool? write, bool? notify}) {
+    final p = _peerState[id] ??= _PeerState();
+    if (write  != null) p.writeReady  = write;
+    if (notify != null) p.notifyReady = notify;
+    _trySendHello(id);
+  }
+
+  void _trySendHello(String id) {
+    final p = _peerState[id];
+    if (p == null) return;
+    if (!p.isReady) return;
+    if (p.helloSent) return;
+    if (_myNotifyChar == null) return;
+    p.helloSent = true;
+    _sendHelloToCentral(id);
+  }
+
+  // FIX: was called in startAdvertising but never defined
+  void _completeAdvertisingReady() {
+    if (_advertisingReady != null && !_advertisingReady!.isCompleted) {
+      _advertisingReady!.complete();
+    }
+  }
+
+  // ── Setup ──────────────────────────────────────────────────────────────────
+
   Future<void> setup() async {
     if (_isSetup) return;
     _isSetup = true;
 
-    // v6: No setUp() call needed; instead listen to state changes and authorize
-    // manually on Android
     _centralStateSub = _central.stateChanged.listen((e) async {
-      if (Platform.isAndroid &&
-          e.state == BluetoothLowEnergyState.unauthorized) {
-        try {
-          await _central.authorize();
-        } catch (_) {
-          // Authorization may fail; user must grant permission in system settings
-        }
+      if (Platform.isAndroid && e.state == BluetoothLowEnergyState.unauthorized) {
+        try { await _central.authorize(); } catch (_) {}
       }
     });
 
     _peripheralStateSub = _peripheral.stateChanged.listen((e) async {
-      if (Platform.isAndroid &&
-          e.state == BluetoothLowEnergyState.unauthorized) {
-        try {
-          await _peripheral.authorize();
-        } catch (_) {
-          // Authorization may fail; user must grant permission in system settings
-        }
+      if (Platform.isAndroid && e.state == BluetoothLowEnergyState.unauthorized) {
+        try { await _peripheral.authorize(); } catch (_) {}
       }
     });
 
-    // v6: state is now a synchronous property, not async
-    final currentState = _central.state;
-    if (currentState != BluetoothLowEnergyState.poweredOn) {
+    if (_central.state != BluetoothLowEnergyState.poweredOn) {
       await _central.stateChanged
           .where((e) => e.state == BluetoothLowEnergyState.poweredOn)
           .first
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () =>
-                throw TimeoutException('Bluetooth initialization timeout'),
-          );
+          .timeout(const Duration(seconds: 10),
+              onTimeout: () => throw TimeoutException('BT init timeout'));
     }
 
     _listenCentralEvents();
     _listenPeripheralEvents();
   }
 
-  /// Cleans up all resources and subscriptions.
-  ///
-  /// Should be called when the service is no longer needed, typically in
-  /// [dispose()] of the owning widget or on app shutdown.
   Future<void> dispose() async {
     await stopAdvertising();
     await stopScan();
@@ -153,424 +148,345 @@ bool _isConnecting = false;
     await _notifyStateSub.cancel();
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Advertising (Peripheral Role)
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Advertising ────────────────────────────────────────────────────────────
 
-  /// Starts advertising the BLE service as a peripheral.
-  ///
-  /// Sets up the GATT service with read/write and notify characteristics,
-  /// then advertises with the given [nodeId].
-  ///
-  /// Errors are silently caught; check connectivity via [connectedPeerIds].
- Future<void> startAdvertising(String nodeId) async {
-  if (_isAdvertising) {
-    print('⚠️ Already advertising');
-    return;
-  }
-
-  try {
+  Future<void> startAdvertising(String nodeId) async {
+    if (_isAdvertising) return;
     _isAdvertising = true;
 
-    await _peripheral.removeAllServices();
+    try {
+      await _peripheral.removeAllServices();
 
-    final writeChar = GATTCharacteristic.mutable(
-      uuid: _kWriteCharUuid,
-      properties: [
-        GATTCharacteristicProperty.write,
-        GATTCharacteristicProperty.writeWithoutResponse,
-      ],
-      permissions: [
-        GATTCharacteristicPermission.write,
-        GATTCharacteristicPermission.writeEncrypted,
-      ],
-      descriptors: [],
-    );
+      final writeChar = GATTCharacteristic.mutable(
+        uuid: _kWriteCharUuid,
+        properties: [
+          GATTCharacteristicProperty.write,
+          GATTCharacteristicProperty.writeWithoutResponse,
+        ],
+        permissions: [
+          GATTCharacteristicPermission.write,
+          GATTCharacteristicPermission.writeEncrypted,
+        ],
+        descriptors: [],
+      );
 
-    final notifyChar = GATTCharacteristic.mutable(
-      uuid: _kNotifyCharUuid,
-      properties: [GATTCharacteristicProperty.notify],
-      permissions: [GATTCharacteristicPermission.read],
-      descriptors: [
-        GATTDescriptor.mutable(
-          uuid: UUID.fromString(
-            '00002902-0000-1000-8000-00805f9b34fb',
+      final notifyChar = GATTCharacteristic.mutable(
+        uuid: _kNotifyCharUuid,
+        properties: [GATTCharacteristicProperty.notify],
+        permissions: [GATTCharacteristicPermission.read],
+        descriptors: [
+          GATTDescriptor.mutable(
+            uuid: UUID.fromString('00002902-0000-1000-8000-00805f9b34fb'),
+            permissions: [
+              GATTCharacteristicPermission.read,
+              GATTCharacteristicPermission.write,
+            ],
           ),
-          permissions: [
-            GATTCharacteristicPermission.read,
-            GATTCharacteristicPermission.write,
-          ],
+        ],
+      );
+
+      await _peripheral.addService(
+        GATTService(
+          uuid: _kServiceUuid,
+          isPrimary: true,
+          characteristics: [writeChar, notifyChar],
+          includedServices: [],
         ),
-      ],
-    );
+      );
 
-    _myNotifyChar = notifyChar;
+      await _peripheral.startAdvertising(
+        Advertisement(
+          name: 'DTN-$nodeId',
+          serviceUUIDs: [_kServiceUuid],
+        ),
+      );
 
-    await _peripheral.addService(
-      GATTService(
-        uuid: _kServiceUuid,
-        isPrimary: true,
-        characteristics: [writeChar, notifyChar],
-        includedServices: [],
-      ),
-    );
+      // Set AFTER startAdvertising so _myNotifyChar != null only when
+      // the GATT service is fully registered and advertising has started.
+      // The retry loop in _sendHelloToCentralWithRetry checks this.
+      _myNotifyChar = notifyChar;
+      print('✅ [BLE] Advertising ready — notifyChar set, completing ready signal');
+      _completeAdvertisingReady();
 
-    await _peripheral.startAdvertising(
-      Advertisement(
-        name: 'DTN-$nodeId',
-        serviceUUIDs: [_kServiceUuid],
-      ),
-    );
-
-    print('📡 Advertising started');
-  } catch (e) {
-    _isAdvertising = false;
-    print('❌ Advertising failed: $e');
+      for (final id in List.from(_connectedCentrals.keys)) {
+        print('🔔 [BLE] Flushing HELLO to already-connected central: $id');
+        _sendHelloToCentral(id);
+      }
+    } catch (e) {
+      print('❌ [BLE] startAdvertising failed: $e');
+      _isAdvertising = false;
+    }
   }
-}
 
-  /// Stops advertising and removes all services from the local GATT database.
-Future<void> stopAdvertising() async {
-  if (!_isAdvertising) return;
-
-  try {
-    await _peripheral.stopAdvertising();
-    await _peripheral.removeAllServices();
-
-    _myNotifyChar = null;
-
-    print('🛑 Advertising stopped');
-  } catch (e) {
-    print('❌ Stop advertising failed: $e');
-  } finally {
+  Future<void> stopAdvertising() async {
+    try {
+      await _peripheral.stopAdvertising();
+      await _peripheral.removeAllServices();
+      _myNotifyChar = null;
+    } catch (_) {}
     _isAdvertising = false;
   }
-}
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Scanning (Central Role)
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Scanning ───────────────────────────────────────────────────────────────
 
-  /// Starts scanning for advertised BLE peripherals.
-  ///
-  /// Returns true if scan started successfully, false if Bluetooth is off.
-  /// Discovered peers matching our service UUID are automatically connected.
-  /// Service UUID filtering is done in the discovered event handler.
-  ///
-  /// v6 note: [startDiscovery] no longer accepts [serviceUUIDs]; filtering
-  /// is manual in the event listener.
-Future<bool> startScan() async {
-  if (_isScanning) {
-    print('⚠️ Already scanning');
-    return true;
-  }
-
-  try {
-    final state = _central.state;
-
-    if (state != BluetoothLowEnergyState.poweredOn) {
+  Future<bool> startScan() async {
+    if (_isScanning) return true;
+    _isScanning = true;
+    try {
+      if (_central.state != BluetoothLowEnergyState.poweredOn) {
+        _isScanning = false;
+        return false;
+      }
+      await _central.startDiscovery();
+      return true;
+    } catch (_) {
+      _isScanning = false;
       return false;
     }
-
-    _isScanning = true;
-
-    await _central.startDiscovery();
-
-    print('🔍 Scan started');
-
-    return true;
-  } catch (e) {
-    _isScanning = false;
-    print('❌ Scan failed: $e');
-    return false;
   }
-}
 
-  /// Stops scanning for peripherals.
-Future<void> stopScan() async {
-  if (!_isScanning) return;
-
-  try {
-    await _central.stopDiscovery();
-
-    print('🛑 Scan stopped');
-  } catch (e) {
-    print('❌ Stop scan failed: $e');
-  } finally {
+  Future<void> stopScan() async {
+    try { await _central.stopDiscovery(); } catch (_) {}
     _isScanning = false;
   }
-}
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Central Event Listeners
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Central events ─────────────────────────────────────────────────────────
 
-  /// Sets up listeners for central manager events.
-  ///
-  /// Handles:
-  /// - Peripheral discovery: auto-connect if service UUID matches
-  /// - Connection state changes: cleanup on disconnect
-  /// - Characteristic notifications: data reception
   void _listenCentralEvents() {
-    // Device discovered while scanning
     _discoverySub = _central.discovered.listen((e) {
       final id = e.peripheral.uuid.toString();
       if (!_discoveredPeers.containsKey(id)) {
         _discoveredPeers[id] = e.peripheral;
+        onDeviceDiscovered?.call(id, e.advertisement.name ?? 'DTN Node', e.rssi);
 
-        // Notify UI of any discovered device immediately (before service check)
-        final name = e.advertisement.name ?? 'DTN Node';
-        final rssi = e.rssi;
-        onDeviceDiscovered?.call(id, name, rssi);
-
-        // v6: Manual service UUID filtering (no longer in startDiscovery)
-        final advServiceUuids = e.advertisement.serviceUUIDs;
-        final hasOurService = advServiceUuids.any(
-          (u) =>
-              u.toString().toLowerCase() ==
-              _kServiceUuid.toString().toLowerCase(),
+        final hasOurService = e.advertisement.serviceUUIDs.any(
+          (u) => u.toString().toLowerCase() == _kServiceUuid.toString().toLowerCase(),
         );
-
-      if (hasOurService &&
-    !_writeChars.containsKey(id) &&
-    !_isConnecting) {
-  _connectToPeer(e.peripheral);
-}
+        if (hasOurService) _connectToPeer(e.peripheral);
       }
     });
 
-    // Peripheral connection state changed
     _centralConnSub = _central.connectionStateChanged.listen((e) {
       final id = e.peripheral.uuid.toString();
-
-      if (e.state==ConnectionState.disconnected) {
+      if (e.state == ConnectionState.disconnected) {
         _discoveredPeers.remove(id);
         _writeChars.remove(id);
         _notifyChars.remove(id);
         _rxBuffers.remove(id);
+        _peerState.remove(id);
         onDeviceLost?.call(id);
       }
     });
 
-    // Incoming characteristic notifications from a connected peripheral
-    // v6: Event arg is GATTCharacteristicNotifiedEventArgs
     _notifiedSub = _central.characteristicNotified.listen((e) {
-      _onData(e.peripheral.uuid.toString(), e.value);
+      final id = e.peripheral.uuid.toString();
+      print('🔔 Notify from peripheral: $id  bytes: ${e.value.length}');
+      _onData(id, e.value);
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Peripheral Event Listeners
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Peripheral events ──────────────────────────────────────────────────────
 
-  /// Sets up listeners for peripheral manager events.
-  ///
-  /// Handles:
-  /// - Central connections: send hello packet
-  /// - Write requests: process incoming data and respond
-  /// - Notify state changes: track subscription status
   void _listenPeripheralEvents() {
-    // v6: connectionStateChanged available on Android only
     _peripheralConnSub = _peripheral.connectionStateChanged.listen((e) {
       final id = e.central.uuid.toString();
-      if (e.state==ConnectionState.connected) {
+      if (e.state == ConnectionState.connected) {
         _connectedCentrals[id] = e.central;
-        _sendHelloToCentral(id);
+        _sendHelloToCentralWithRetry(id);
       } else {
         _connectedCentrals.remove(id);
         _rxBuffers.remove(id);
+        _peerState.remove(id);
       }
     });
 
-    // v6: characteristicWriteRequested replaces characteristicWritten
-    // We must call respondWriteRequest() to complete the ATT exchange
     _writeRequestSub = _peripheral.characteristicWriteRequested.listen((e) async {
-         _onData(e.central.uuid.toString(), e.request.value);   // ✅ RIGHT
-      // IMPORTANT: Must respond to write requests in v6
-      try {
-    await _peripheral.respondWriteRequest(e.request); 
+      final id = e.central.uuid.toString();
+      print('✏️ Write request from central: $id  bytes: ${e.request.value.length}');
+      _onData(id, e.request.value);
+      try { await _peripheral.respondWriteRequest(e.request); } catch (_) {}
+    });
 
+    _notifyStateSub = _peripheral.characteristicNotifyStateChanged.listen((_) {});
+  }
+
+  // ── Connection ─────────────────────────────────────────────────────────────
+
+  Future<void> _sendHelloToCentralWithRetry(String centralId) async {
+    // Fast path: notify char already ready.
+    if (_myNotifyChar != null) {
+      await _sendHelloToCentral(centralId);
+      return;
+    }
+
+    // Slow path: advertising hasn't finished yet — wait then retry in a loop.
+    // The central may have connected before startAdvertising completed.
+    // We keep retrying every 2 seconds for up to 30 seconds so the HELLO
+    // is eventually delivered even after a long startup delay.
+    _advertisingReady ??= Completer<void>();
+
+    bool sent = false;
+    for (int attempt = 0; attempt < 15 && !sent; attempt++) {
+      try {
+        await _advertisingReady!.future.timeout(const Duration(seconds: 2));
       } catch (_) {
-        // Response may fail if connection drops; ignore silently
-      }
-    });
-
-    // Subscription state changed (central enabled/disabled notifications)
-    _notifyStateSub = _peripheral.characteristicNotifyStateChanged.listen((_) {
-      // Track state changes if needed; currently unused
-    });
-  }
-
-  // ────────────────────────────────────────────────────────────────────────
-  // Connection Management
-  // ────────────────────────────────────────────────────────────────────────
-
-  /// Connects to a discovered peripheral and discovers GATT characteristics.
-  ///
-  /// - Connects to the peripheral
-  /// - Requests MTU on Android (v6 requires manual request)
-  /// - Discovers GATT services and characteristics
-  /// - Subscribes to notify characteristic
-  /// - Sends hello packet to peer
- Future<void> _connectToPeer(Peripheral peripheral) async {
-  final id = peripheral.uuid.toString();
-
-  if (_writeChars.containsKey(id)) {
-    print('⚠️ Already connected to $id');
-    return;
-  }
-
-  if (_isConnecting) {
-    print('⚠️ Connection already in progress');
-    return;
-  }
-
-  _isConnecting = true;
-
-  try {
-    await _central.connect(peripheral);
-
-    if (Platform.isAndroid) {
-      try {
-        await _central.requestMTU(peripheral, mtu: 517);
-      } catch (_) {}
-    }
-
-    final services = await _central.discoverGATT(peripheral);
-
-    for (final svc in services) {
-      if (svc.uuid.toString().toLowerCase() !=
-          _kServiceUuid.toString().toLowerCase()) {
-        continue;
+        // timeout on this attempt — check if char is ready yet
       }
 
-      for (final char in svc.characteristics) {
-        final uuid = char.uuid.toString().toLowerCase();
-
-        if (uuid == _kWriteCharUuid.toString().toLowerCase()) {
-          _writeChars[id] = char;
+      if (_myNotifyChar != null) {
+        await _sendHelloToCentral(centralId);
+        sent = true;
+        print('✅ Hello sent to $centralId on attempt ${attempt + 1}');
+      } else {
+        // Still not ready — only keep waiting if central is still connected
+        if (!_connectedCentrals.containsKey(centralId)) {
+          print('⚠️ Central $centralId disconnected before HELLO could be sent');
+          return;
         }
+        print('⏳ Waiting for advertising ready (attempt ${attempt + 1}) for $centralId');
 
-        if (uuid == _kNotifyCharUuid.toString().toLowerCase()) {
-          _notifyChars[id] = char;
-
-          try {
-            await _central.setCharacteristicNotifyState(
-              peripheral,
-              char,
-              state: true,
-            );
-          } catch (_) {}
+        // Reset completer for next wait round if it was already completed
+        if (_advertisingReady!.isCompleted) {
+          _advertisingReady = Completer<void>();
         }
       }
     }
 
-    await _sendHello(id);
-
-    print('✅ Connected to peer: $id');
-  } catch (e) {
-    _discoveredPeers.remove(id);
-    print('❌ Connection failed: $e');
-  } finally {
-    _isConnecting = false;
+    if (!sent) {
+      print('❌ Gave up waiting to send HELLO to $centralId after 30s');
+    }
   }
-}
-  // ────────────────────────────────────────────────────────────────────────
-  // Message Sending (Handshake & Data)
-  // ────────────────────────────────────────────────────────────────────────
 
-  /// Sends a HELLO packet to the peer (as central, via write).
+  Future<void> _connectToPeer(Peripheral peripheral) async {
+    final id = peripheral.uuid.toString();
+    try {
+      await _central.connect(peripheral);
+
+      if (Platform.isAndroid) {
+        try { await _central.requestMTU(peripheral, mtu: 517); } catch (_) {}
+      }
+
+      final services = await _central.discoverGATT(peripheral);
+
+      for (final svc in services) {
+        if (svc.uuid.toString().toLowerCase() != _kServiceUuid.toString().toLowerCase()) continue;
+
+        for (final char in svc.characteristics) {
+          final uuid = char.uuid.toString().toLowerCase();
+
+          if (uuid == _kWriteCharUuid.toString().toLowerCase()) {
+            _writeChars[id] = char;
+            _markReady(id, write: true);
+          }
+
+          if (uuid == _kNotifyCharUuid.toString().toLowerCase()) {
+            _notifyChars[id] = char;
+            try {
+              await _central.setCharacteristicNotifyState(peripheral, char, state: true);
+              print('✅ Notify subscribed for $id');
+              _markReady(id, notify: true);
+            } catch (_) {}
+          }
+        }
+      }
+
+      await _sendHello(id);
+    } catch (_) {
+      _discoveredPeers.remove(id);
+    }
+  }
+
+  // ── Sending ────────────────────────────────────────────────────────────────
+
   Future<void> _sendHello(String peerId) async {
-    await _writePacket(peerId, await _buildHelloPacket());
+    final packet = await _buildHelloPacket();
+    // Tell the peripheral its own BLE UUID as we (the central) see it.
+    packet['recipientBleId'] = peerId;
+    await _writePacket(peerId, packet);
   }
 
-  /// Sends a HELLO packet to a connected central (as peripheral, via notify).
   Future<void> _sendHelloToCentral(String centralId) async {
     final central = _connectedCentrals[centralId];
-    final char = _myNotifyChar;
+    final char    = _myNotifyChar;
     if (central == null || char == null) return;
 
-    final raw = Uint8List.fromList(
-      utf8.encode('${jsonEncode(await _buildHelloPacket())}\n'),
-    );
+    final packet = await _buildHelloPacket();
+    final raw = Uint8List.fromList(utf8.encode('${jsonEncode(packet)}\n'));
 
     try {
-      // v6: notifyCharacteristic takes (central, characteristic, value:)
-      await _peripheral.notifyCharacteristic(
-        central,
-        char,
-        value: raw,
-      );
-    } catch (_) {
-      // Notification may fail if connection drops or central unsubscribed
+      await _peripheral.notifyCharacteristic(central, char, value: raw);
+    } catch (e) {
+      print('❌ notifyCharacteristic FAILED: $e');
     }
   }
 
-  /// Builds the hello packet, or uses custom builder if provided.
   Future<Map<String, dynamic>> _buildHelloPacket() async {
-    if (helloPacketBuilder != null) {
-      return helloPacketBuilder!();
-    }
-    return {
-      'type': 'HELLO',
-      'nodeId': 'unknown',
-      'preds': {},
-      'msgIds': [],
-    };
+    if (helloPacketBuilder != null) return helloPacketBuilder!();
+    return {'type': 'HELLO', 'nodeId': 'unknown', 'preds': {}, 'msgIds': []};
   }
 
-  /// Sends a DTN message to a peer (central role, via write characteristic).
   Future<void> sendMessage(String peerId, DtnMessage msg) async {
-    await _writePacket(peerId, _msgToPacket(msg));
+    final packet     = _msgToPacket(msg);
+    final writeChar  = _writeChars[peerId];
+    final peripheral = _discoveredPeers[peerId];
+    final central    = _connectedCentrals[peerId];
+
+    print('📤 [BLE sendMessage] peerId=$peerId msgId=${msg.id}');
+    print('   writeChar=${writeChar != null} peripheral=${peripheral != null} central=${central != null}');
+
+    if (writeChar != null && peripheral != null) {
+      // We are the central — use GATT write
+      print('   → path: central→write');
+      await _writePacket(peerId, packet);
+      print('✅ [BLE sendMessage] write sent for ${msg.id}');
+    } else if (central != null && _myNotifyChar != null) {
+      // We are the peripheral — use notify
+      print('   → path: peripheral→notify');
+      final raw = Uint8List.fromList(utf8.encode('${jsonEncode(packet)}\n'));
+      try {
+        await _peripheral.notifyCharacteristic(central, _myNotifyChar!, value: raw);
+        print('✅ [BLE sendMessage] notify sent for ${msg.id}');
+      } catch (e) {
+        print('❌ [BLE sendMessage] notify failed for ${msg.id}: $e');
+      }
+    } else {
+      print('❌ [BLE sendMessage] NO SEND PATH for $peerId — writeChar=$writeChar peripheral=$peripheral central=$central myNotifyChar=${_myNotifyChar != null}');
+    }
   }
 
-  /// Sends a DTN message to a connected central (peripheral role, via notify).
   Future<void> sendMessageToCentral(String centralId, DtnMessage msg) async {
     final central = _connectedCentrals[centralId];
-    final char = _myNotifyChar;
+    final char    = _myNotifyChar;
     if (central == null || char == null) return;
-
-    final raw = Uint8List.fromList(
-      utf8.encode('${jsonEncode(_msgToPacket(msg))}\n'),
-    );
-
+    final raw = Uint8List.fromList(utf8.encode('${jsonEncode(_msgToPacket(msg))}\n'));
     try {
-      // v6: notifyCharacteristic takes (central, characteristic, value:)
-      await _peripheral.notifyCharacteristic(
-        central,
-        char,
-        value: raw,
-      );
-    } catch (_) {
-      // Notification may fail
-    }
+      await _peripheral.notifyCharacteristic(central, char, value: raw);
+    } catch (_) {}
   }
 
-  /// Converts a DTN message to a wire format packet.
-  Map<String, dynamic> _msgToPacket(DtnMessage msg) => {
-        'type': 'MSG',
-        'id': msg.id,
-        'source': msg.source,
-        'destination': msg.destination,
-        'payload': msg.payload,
-        'ttl': msg.ttl,
-        'priority': msg.priority,
-        'createdAt': msg.createdAt.toIso8601String(),
-      };
+  // The sender's display name is injected by DtnManager via helloPacketBuilder.
+  // We store it here so _msgToPacket can include it.
+  String? myDisplayName;
 
-  /// Writes a packet to a peer's characteristic with automatic fragmentation.
-  ///
-  /// v6 requires manual fragmentation based on getMaximumWriteLength().
-  /// Packets are split into chunks and sent sequentially.
-  Future<void> _writePacket(
-      String peerId, Map<String, dynamic> packet) async {
-    final char = _writeChars[peerId];
+  Map<String, dynamic> _msgToPacket(DtnMessage msg) => {
+    'type':            'MSG',
+    'id':              msg.id,
+    'source':          msg.source,
+    'senderName':      myDisplayName ?? '',
+    'destination':     msg.destination,
+    'nodeDestination': msg.nodeDestination,
+    'payload':         msg.payload,
+    'ttl':             msg.ttl,
+    'priority':        msg.priority,
+    'createdAt':       msg.createdAt.toIso8601String(),
+  };
+
+  Future<void> _writePacket(String peerId, Map<String, dynamic> packet) async {
+    final char       = _writeChars[peerId];
     final peripheral = _discoveredPeers[peerId];
     if (char == null || peripheral == null) return;
 
-    final raw = Uint8List.fromList(utf8.encode('${jsonEncode(packet)}\n'));
-
-    // v6: Query maximum write length and manually fragment
+    final raw          = Uint8List.fromList(utf8.encode('${jsonEncode(packet)}\n'));
     final fragmentSize = await _central.getMaximumWriteLength(
       peripheral,
       type: GATTCharacteristicWriteType.withoutResponse,
@@ -578,113 +494,142 @@ Future<void> stopScan() async {
 
     var start = 0;
     while (start < raw.length) {
-      final end = start + fragmentSize;
-      final chunk = end < raw.length
-          ? raw.sublist(start, end)
-          : raw.sublist(start);
-
-      // v6: writeCharacteristic takes (peripheral, characteristic, value:, type:)
+      final end   = start + fragmentSize;
+      final chunk = end < raw.length ? raw.sublist(start, end) : raw.sublist(start);
       try {
         await _central.writeCharacteristic(
-          peripheral,
-          char,
+          peripheral, char,
           value: chunk,
           type: GATTCharacteristicWriteType.withoutResponse,
         );
       } catch (_) {
-        // Write failed; stop sending remaining fragments
         return;
       }
-
       start = end;
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Message Receiving
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Receiving ──────────────────────────────────────────────────────────────
 
-  /// Processes incoming raw data from a peer.
-  ///
-  /// Buffers incomplete frames (split by newlines) and handles complete frames
-  /// via [_handlePacket].
   void _onData(String peerId, Uint8List data) {
-    final buf = _rxBuffers[peerId] ??= StringBuffer();
-    buf.write(utf8.decode(data, allowMalformed: true));
+    print('📡 [BLE _onData] from=$peerId bytes=${data.length}');
+    final buf     = _rxBuffers[peerId] ??= StringBuffer();
+    final decoded = utf8.decode(data, allowMalformed: false);
+    buf.write(decoded);
 
-    // Split on newline and keep incomplete frame in buffer
     final frames = buf.toString().split('\n');
     _rxBuffers[peerId] = StringBuffer(frames.removeLast());
+    print('📡 [BLE _onData] frames to process: ${frames.where((f) => f.trim().isNotEmpty).length}');
 
     for (final frame in frames) {
       if (frame.trim().isEmpty) continue;
       try {
-        _handlePacket(peerId, jsonDecode(frame) as Map<String, dynamic>);
-      } catch (_) {
-        // Malformed frame; skip silently
+        final map = jsonDecode(frame) as Map<String, dynamic>;
+        print('📡 [BLE _onData] parsed frame type=${map['type']}');
+        _handlePacket(peerId, map);
+      } catch (e) {
+        print('❌ [BLE _onData] failed to parse frame: $e  raw="${frame.length > 80 ? frame.substring(0,80) : frame}"');
       }
     }
   }
 
-  /// Handles a complete packet from a peer.
-  ///
-  /// Dispatches to [onPeerConnected] for HELLO packets or
-  /// [onMessageReceived] for MSG packets.
   void _handlePacket(String peerId, Map<String, dynamic> map) {
     final type = map['type'] as String? ?? '';
 
     switch (type) {
       case 'HELLO':
+        print('📨 HELLO packet from $peerId: nodeId=${map['nodeId']}');
+
         final preds = Map<String, double>.from(
           (map['preds'] as Map? ?? {}).map(
             (k, v) => MapEntry(k as String, (v as num).toDouble()),
           ),
         );
-        final peerDtnNodeId = map['nodeId'] as String?;
-        if (peerDtnNodeId != null && peerDtnNodeId.isNotEmpty) {
-          onPeerNodeId?.call(peerId, peerDtnNodeId);
+
+        final peerNodeId   = map['nodeId']      as String?;
+        final peerDispName = map['displayName'] as String?;
+
+        if (peerNodeId != null && peerNodeId.isNotEmpty) {
+          onPeerNodeId?.call(peerId, peerNodeId);
         }
-        final peerDisplayName = map['displayName'] as String?;
-        if (peerDisplayName != null && peerDisplayName.isNotEmpty) {
-          onPeerDisplayName?.call(peerId, peerDisplayName);
+
+        // Tell DtnManager our own BLE UUID so it can match incoming messages
+        final myBleId = map['recipientBleId'] as String?;
+        if (myBleId != null && myBleId.isNotEmpty) {
+          onMyBleIdLearned?.call(myBleId);
         }
+
+        if (peerDispName != null && peerDispName.isNotEmpty) {
+          onPeerDisplayName?.call(peerId, peerDispName);
+        }
+
         onPeerConnected?.call(
           peerId,
           preds,
           List<String>.from(map['msgIds'] as List? ?? []),
         );
+        break;
 
       case 'MSG':
-        try {
-          onMessageReceived?.call(DtnMessage(
-            id: map['id'] as String,
-            source: map['source'] as String,
-            destination: map['destination'] as String,
-            payload: map['payload'] as String,
-            createdAt: DateTime.parse(map['createdAt'] as String),
-            ttl: map['ttl'] as int,
-            priority: map['priority'] as int,
-          ));
-        } catch (_) {
-          // Malformed message; silently ignore
+        print('📨 [BLE _handlePacket] MSG received from $peerId');
+        print('   id=${map['id']} src=${map['source']} dest=${map['destination']} nodeDest=${map['nodeDestination']}');
+        print('   payload=${map['payload']} ttl=${map['ttl']} priority=${map['priority']}');
+
+        // Learn BLE UUID → DTN ID mapping from the message source field.
+        // This handles the case where a MSG arrives before any HELLO was
+        // exchanged (e.g. peripheral never sent HELLO back in time).
+        final msgSrc = map['source'] as String?;
+        if (msgSrc != null && msgSrc.isNotEmpty && msgSrc.startsWith('node_')) {
+          print('📡 [BLE] Learning mapping from MSG: $peerId → $msgSrc');
+          onPeerNodeId?.call(peerId, msgSrc);
         }
 
+        // Also learn the sender display name if included in MSG
+        final senderName = map['senderName'] as String?;
+        if (senderName != null && senderName.isNotEmpty && msgSrc != null) {
+          print('📡 [BLE] Learning display name from MSG: $msgSrc = $senderName');
+          onPeerDisplayName?.call(peerId, senderName);
+        }
+
+        try {
+          final msg = DtnMessage(
+            id:              map['id']          as String,
+            source:          map['source']      as String,
+            destination:     map['destination'] as String,
+            nodeDestination: (map['nodeDestination'] as String?)?.isNotEmpty == true
+                ? map['nodeDestination'] as String
+                : map['destination'] as String,
+            payload:         map['payload']   as String,
+            createdAt:       DateTime.parse(map['createdAt'] as String),
+            ttl:             map['ttl']       as int,
+            priority:        map['priority']  as int,
+          );
+          print('📨 [BLE _handlePacket] DtnMessage built OK, calling onMessageReceived');
+          if (onMessageReceived != null) {
+            onMessageReceived!.call(msg);
+            print('📨 [BLE _handlePacket] onMessageReceived callback returned');
+          } else {
+            print('⚠️ [BLE _handlePacket] onMessageReceived is NULL — message dropped!');
+          }
+        } catch (e) {
+          print('❌ [BLE _handlePacket] Failed to build DtnMessage from MSG: $e  map=$map');
+        }
+        break;
+
       default:
-        // Unknown packet type; ignore
         break;
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Utility
-  // ────────────────────────────────────────────────────────────────────────
+  // ── Utility ────────────────────────────────────────────────────────────────
 
-  /// Checks if a peer is connected (either as central or peripheral).
   bool isConnected(String peerId) =>
-      _writeChars.containsKey(peerId) ||
-      _connectedCentrals.containsKey(peerId);
+      _writeChars.containsKey(peerId) || _connectedCentrals.containsKey(peerId);
 
-  /// Returns a list of all connected peer IDs.
   List<String> get connectedPeerIds =>
       {..._writeChars.keys, ..._connectedCentrals.keys}.toList();
+
+  void clearDiscoveryCache() {
+    _discoveredPeers.removeWhere((id, _) => !_writeChars.containsKey(id));
+  }
 }

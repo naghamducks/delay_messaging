@@ -5,21 +5,18 @@ import 'package:delay_messenger/services/DTN_Storage_Service.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
 import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart';
 import 'package:delay_messenger/services/transfer_service.dart';
-import 'package:delay_messenger/services/node_identity.dart';
+ import 'package:delay_messenger/services/node_identity.dart';
 
-/// Single source of truth for all singleton services.
-/// Call ServiceLocator.init() once in main() before runApp().
 class ServiceLocator {
   ServiceLocator._();
 
   static late final DtnStorageService storage;
   static late final ProphetRoutingService routing;
   static late final ProphetBroadcastRoutingService sosRouting;
-  static late final TransferService transfer;
+   static late final TransferService transfer;
   static late final BleTransportService ble;
   static late final DtnManager dtnManager;
 
-  /// Must be called (and awaited) before runApp().
   static Future<void> init() async {
     await NodeIdentity.init();
 
@@ -29,17 +26,19 @@ class ServiceLocator {
     storage    = DtnStorageService();
     routing    = ProphetRoutingService();
     sosRouting = ProphetBroadcastRoutingService();
-    transfer   = TransferService(routing, sosRouting);
+     transfer   = TransferService(routing, sosRouting);
     ble        = BleTransportService();
     dtnManager = DtnManager(
       storage:  storage,
       routing:  routing,
       transfer: transfer,
-      ble:      ble,
+       ble:      ble,
     );
+
+    // setup() only registers state listeners and waits for BT power-on.
+    // startAdvertising + startScan are called from main.dart AFTER
+    // permissions are granted — otherwise they fail silently and the
+    // _isAdvertising guard blocks any retry.
     await ble.setup();
-    // Advertise with display name so peers see it immediately on discovery
-    await ble.startAdvertising(NodeIdentity.displayNameOrId);
-    await ble.startScan();
   }
 }

@@ -72,20 +72,17 @@ class _AppStartupState extends State<_AppStartup> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
 
-      // Wire DTNProvider ↔ ChatProvider so chat names update when peer names arrive
+      // Wire DTNProvider ↔ ChatProvider
       final dtnProvider  = context.read<DTNProvider>();
       final chatProvider = context.read<ChatProvider>();
       dtnProvider.setChatProvider(chatProvider);
 
-      // Wire notification callbacks into DtnManager
+      // Wire DtnManager callbacks → UI + notifications
       ServiceLocator.dtnManager.onMessageDelivered = (msg) {
-        // Let ChatProvider handle UI update
         chatProvider.handleDeliveredMessage(msg);
-
-        // Fire notification
-        final senderName = dtnProvider.peerDisplayName(msg.source);
+        final senderName   = dtnProvider.peerDisplayName(msg.source);
         final isSOSMessage = msg.priority > 5;
-        final content = msg.payload.contains('|')
+        final content      = msg.payload.contains('|')
             ? msg.payload.split('|').first
             : msg.payload;
         NotificationService.showMessageNotification(
@@ -95,29 +92,35 @@ class _AppStartupState extends State<_AppStartup> {
         );
       };
 
-      // Wire relay notification
       ServiceLocator.dtnManager.onMessageRelayed = (msg, toPeerId) {
-        final fromName = dtnProvider.peerDisplayName(msg.source);
-        final toName   = dtnProvider.peerDisplayName(toPeerId);
         NotificationService.showRelayNotification(
-          fromName: fromName,
-          toName: toName,
+          fromName: dtnProvider.peerDisplayName(msg.source),
+          toName:   dtnProvider.peerDisplayName(toPeerId),
         );
       };
 
-      // First-launch: prompt for display name
+      // First-launch name dialog
       if (NodeIdentity.needsDisplayName) {
         await _showNameDialog();
       }
-
       if (!mounted) return;
 
       // Bluetooth check
       await BluetoothCheckDialog.show(context);
       if (!mounted) return;
 
-      // Request permissions
+      // Request BLE permissions
+      print('🔐 Requesting BLE permissions...');
       await BlePermissionService.requestAll(context);
+      if (!mounted) return;
+
+      // ── START BLE HERE — after permissions are confirmed ──────────────────
+      // This is the only correct place. Calling startAdvertising before
+      // permissions causes a silent failure that the _isAdvertising guard
+      // then permanently blocks from retrying.
+      print('📡 Starting BLE advertising + scan...');
+      await ServiceLocator.dtnManager.startBle();
+      print('✅ BLE started');
     });
   }
 
