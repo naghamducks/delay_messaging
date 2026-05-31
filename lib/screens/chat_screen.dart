@@ -1,22 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
-import '../providers/dtn_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/message_input_bar.dart';
 
-/// Main chat screen displaying messages and input
-class ChatScreen extends StatelessWidget {
+class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Consumer<ChatProvider>(
-          builder: (context, chatProvider, child) {
-            return Text(chatProvider.currentChat?.name ?? 'Chat');
-          },
+          builder: (context, chatProvider, _) =>
+              Text(chatProvider.currentChat?.name ?? 'Chat'),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -24,7 +46,7 @@ class ChatScreen extends StatelessWidget {
         ),
       ),
       body: Consumer<ChatProvider>(
-        builder: (context, chatProvider, child) {
+        builder: (context, chatProvider, _) {
           final currentChat = chatProvider.currentChat;
 
           if (currentChat == null) {
@@ -32,76 +54,70 @@ class ChatScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
+                  Icon(Icons.chat_bubble_outline,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.secondary),
                   const SizedBox(height: 16),
-                  Text(
-                    'No chat selected',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Select a chat from the dropdown above',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                  ),
+                  Text('No chat selected',
+                      style: Theme.of(context).textTheme.titleLarge),
                 ],
               ),
             );
           }
 
+          // Auto-scroll when new messages arrive
+          if (currentChat.messages.isNotEmpty) _scrollToBottom();
+
           return Column(
             children: [
-           
               Expanded(
                 child: currentChat.messages.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.forum_outlined,
-                              size: 64,
-                              color: Theme.of(context).colorScheme.secondary,
-                            ),
+                            Icon(Icons.forum_outlined,
+                                size: 64,
+                                color:
+                                    Theme.of(context).colorScheme.secondary),
                             const SizedBox(height: 16),
-                            Text(
-                              'No messages yet',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
+                            Text('No messages yet',
+                                style:
+                                    Theme.of(context).textTheme.titleLarge),
                             const SizedBox(height: 8),
                             Text(
                               'Start a conversation',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.6),
                                   ),
                             ),
                           ],
                         ),
                       )
                     : ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
+                            horizontal: 16, vertical: 8),
                         itemCount: currentChat.messages.length,
-                        itemBuilder: (context, index) {
-                          final message = currentChat.messages[index];
-                          return MessageBubble(message: message);
-                        },
+                        itemBuilder: (context, index) => MessageBubble(
+                          message: currentChat.messages[index],
+                        ),
                       ),
               ),
-              // Input bar
               MessageInputBar(
                 onSendMessage: (content) {
                   chatProvider.sendMessage(content);
+                  _scrollToBottom();
                 },
                 onSendSOS: (content) {
                   chatProvider.sendMessage(content, isSOSMessage: true);
+                  _scrollToBottom();
                 },
               ),
             ],

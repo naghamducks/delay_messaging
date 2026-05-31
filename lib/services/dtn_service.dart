@@ -1,16 +1,11 @@
 import 'package:delay_messenger/models/dtn_message.dart';
-import 'package:delay_messenger/providers/dtn_provider.dart';
-import 'package:delay_messenger/services/ble_transport_service.dart';
 import 'package:delay_messenger/services/service_locator.dart';
 
 import '../models/message.dart';
 import '../models/dtn_device.dart';
 
 /// Service for DTN network operations
-/// This is a placeholder for future backend integration
 class DTNService {
-  DTNProvider _dtnProvider=DTNProvider();
-  final BleTransportService ble=BleTransportService();
 
   /// Send a message through the DTN network
   /// In a real implementation, this would handle:
@@ -63,17 +58,20 @@ Future<void> sendMessage(String peerId, DtnMessage msg) async {
 
   /// Register as a relay node to forward messages for others
   Future<void> enableRelayMode() async {
-    // TODO: Configure device to act as a relay
-    // - Accept custody of messages
-    // - Implement forwarding policies
-    // - Manage bundle storage
+    // Relay mode preference is persisted in SharedPreferences (SettingsScreen).
+    // The actual relay behaviour is always active in DtnManager.
     await Future.delayed(const Duration(milliseconds: 500));
   }
 
-  /// Query relay history from local storage
+  /// Query relay history from local storage (last 10 entries)
   Future<List<Map<String, dynamic>>> getRelayHistory() async {
-    // TODO: Retrieve relay logs from persistent storage
-    await Future.delayed(const Duration(milliseconds: 200));
-    return [];
+    final msgs = ServiceLocator.storage.getRelayMessages()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return msgs.take(10).map((m) => {
+      'id': m.id,
+      'source': m.source,
+      'destination': m.destination,
+      'createdAt': m.createdAt.toIso8601String(),
+    }).toList();
   }
 }

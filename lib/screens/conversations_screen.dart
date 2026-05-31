@@ -8,7 +8,9 @@ import 'chat_screen.dart';
 
 /// Displays the list of conversations (contacts) in a messaging app style.
 class ConversationsScreen extends StatelessWidget {
-  const ConversationsScreen({super.key});
+  /// Called when the user taps "Find nearby devices" from the empty state.
+  final VoidCallback? onFindNearbyDevices;
+  const ConversationsScreen({super.key, this.onFindNearbyDevices});
 
   @override
   Widget build(BuildContext context) {
@@ -194,18 +196,19 @@ class ConversationsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Start a new conversation by tapping the button below. Your messages are stored locally and work even offline.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
+              'Go to the Location tab, tap a nearby device, and start a conversation.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.7)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
-              icon: const Icon(Icons.add_comment_outlined),
-              label: const Text('Start a conversation'),
-              onPressed: () => _showCreateChatDialog(context),
+              icon: const Icon(Icons.sensors),
+              label: const Text('Find nearby devices'),
+              onPressed: onFindNearbyDevices ?? () => _showCreateChatDialog(context),
             ),
           ],
         ),

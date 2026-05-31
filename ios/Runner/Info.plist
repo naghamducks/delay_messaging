@@ -2,32 +2,87 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Delay Messaging</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
+
+	<!-- ─────────── App identity ─────────── -->
 	<key>CFBundleName</key>
 	<string>ReachOut</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
+	<key>CFBundleDisplayName</key>
+	<string>ReachOut</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>LSRequiresIPhoneOS</key>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+
+	<!-- ─────────── Bluetooth (BLE central + peripheral) ─────────── -->
+	<!--
+		NSBluetoothAlwaysUsageDescription  — required on iOS 13+
+		iOS has no legacy BLUETOOTH / BLUETOOTH_ADMIN split like Android;
+		this single key covers both scan (central) and advertise (peripheral).
+	-->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>ReachOut uses Bluetooth to discover nearby devices and exchange messages without internet, even in disaster or off-grid scenarios.</string>
+
+	<!--
+		NSBluetoothPeripheralUsageDescription — required on iOS 12 and below.
+		Keep it for backward compatibility; iOS 13+ ignores it in favour of
+		NSBluetoothAlwaysUsageDescription above.
+	-->
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>ReachOut uses Bluetooth to advertise itself to nearby devices so they can deliver messages to you.</string>
+
+	<!-- ─────────── Location ─────────── -->
+	<!--
+		Matches ACCESS_FINE_LOCATION + ACCESS_COARSE_LOCATION on Android.
+		"WhenInUse" is the minimum needed for BLE scanning on iOS 13+.
+		"Always" is needed if you want background BLE scanning/advertising.
+		Include both so the app can request upgrade to "Always" for SOS use.
+	-->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ReachOut uses your location to attach coordinates to SOS messages and to show nearby relay devices on the map.</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>ReachOut uses your location in the background so it can continue relaying messages and broadcasting SOS alerts even when the app is not open.</string>
+
+	<!-- Required on iOS 10 and below; keep for full compatibility -->
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>ReachOut uses your location in the background to relay messages and send SOS alerts.</string>
+
+	<!-- ─────────── Background modes ─────────── -->
+	<!--
+		bluetooth-central  — keep BLE scan alive in background (relay mode)
+		bluetooth-peripheral — keep BLE advertising alive in background
+		These are the iOS equivalents of Android's foreground service for BLE.
+		Without them the OS suspends BLE within seconds of the app backgrounding.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
+
+	<!-- ─────────── Flutter / engine ─────────── -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<!-- ─────────── Launch screen ─────────── -->
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
+
+	<!-- ─────────── Main storyboard ─────────── -->
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
+	<!-- ─────────── Device orientation ─────────── -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -41,23 +96,6 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>This app needs Bluetooth access to communicate with nearby DTN devices.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>This app needs Bluetooth access to communicate with nearby DTN devices.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs location access to discover nearby Bluetooth devices.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-<string>DTN Messenger uses Bluetooth to discover and communicate with nearby devices without internet.</string>
 
-<key>NSBluetoothPeripheralUsageDescription</key>
-<string>DTN Messenger uses Bluetooth to send messages to nearby devices.</string>
-
-<key>NSLocationWhenInUseUsageDescription</key>
-<string>Location is required for Bluetooth scanning on this iOS version.</string>
 </dict>
 </plist>
