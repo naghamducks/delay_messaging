@@ -16,7 +16,7 @@ class ProphetRoutingService {
 
   double _now() => DateTime.now().millisecondsSinceEpoch / 1000.0;
 
-  // 👇 Equivalent to updateDeliveryPredFor()
+   
   void updateDeliveryPred(String peerId) {
     double now = _now();
     double lastTime = lastEncounterTime[peerId] ?? 0;
@@ -38,7 +38,7 @@ class ProphetRoutingService {
     lastEncounterTime[peerId] = now;
   }
 
-  // 👇 Transitivity (A → B → C)
+ // Transitivity (A → B → C)
   void updateTransitivePreds(
       String peerId, Map<String, double> peerPreds) {
     double pAB = getPred(peerId);
