@@ -115,8 +115,7 @@ class _AppStartupState extends State<_AppStartup> {
       if (!mounted) return;
 
       // ── START BLE HERE — after permissions are confirmed ──────────────────
-      // This is the only correct place. Calling startAdvertising before
-      // permissions causes a silent failure that the _isAdvertising guard
+      // Calling startAdvertising before //permissions causes a silent failure that the _isAdvertising guard
       // then permanently blocks from retrying.
       print('📡 Starting BLE advertising + scan...');
       await ServiceLocator.dtnManager.startBle();

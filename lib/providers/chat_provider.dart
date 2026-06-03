@@ -364,8 +364,8 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     // sendOrQueue:
-    //   • mapping known + peer connected → sends immediately, returns true
-    //   • mapping missing or peer not yet connected → queues in DtnManager,
+    //    mapping known + peer connected → sends immediately, returns true
+    //   mapping missing or peer not yet connected → queues in DtnManager,
     //     flushed automatically when the HELLO mapping arrives, returns false
     print('📮 [ChatProvider] Calling sendOrQueue(dtnId=$dtnId, msgId=${dtnMsg.id})');
     final sent = await ServiceLocator.dtnManager.sendOrQueue(dtnId, dtnMsg);

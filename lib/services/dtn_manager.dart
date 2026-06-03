@@ -4,8 +4,7 @@ import 'package:delay_messenger/services/ble_transport_service.dart';
 import 'package:delay_messenger/services/node_identity.dart';
 import 'package:delay_messenger/services/prophet_routing_service.dart';
 import 'package:delay_messenger/services/transfer_service.dart';
-import 'package:delay_messenger/services/prophet_broadcast_routing_service.dart';
-
+ 
 typedef OnMessageDelivered = void Function(DtnMessage msg);
 typedef OnMessageRelayed   = void Function(DtnMessage msg, String toPeerId);
 
