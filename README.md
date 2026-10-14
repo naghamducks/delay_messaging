@@ -159,7 +159,6 @@ Actual results depend on device hardware, operating-system restrictions, Bluetoo
 - Messages may experience delays because communication is opportunistic.
 - Android background-execution and Bluetooth restrictions may affect discovery and forwarding.
 - The application does not replace cellular emergency services or guarantee emergency-message delivery.
-- End-to-end delivery, background operation, and multi-hop reliability should be validated under the intended deployment conditions.
 
 ## Intended Use
 
@@ -171,8 +170,7 @@ Contributions, testing, and suggestions are welcome. Before submitting changes, 
 
 ## License
 
-Add the project's applicable license here before distributing or reusing the software.
-
+The application uses third-party software libraries and OpenStreetMap data under their respective licenses. The application code license is to be determined. OpenStreetMap attribution and ODbL requirements apply to the map data.
 ---
 
 **ReachOut — Keeping messages moving when networks go down.**
