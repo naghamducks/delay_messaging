@@ -168,9 +168,10 @@ ReachOut is designed as a prototype for resilient mobile communication in enviro
 
 Contributions, testing, and suggestions are welcome. Before submitting changes, ensure the application builds successfully and test any modifications that affect Bluetooth communication, routing, message storage, or delivery behavior.
 
-## License
+License
 
-The application uses third-party software libraries and OpenStreetMap data under their respective licenses. The application code license is to be determined. OpenStreetMap attribution and ODbL requirements apply to the map data.
----
+MIT License
+Copyright (c) 2026 nagham younes 
+to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish.
 
 **ReachOut — Keeping messages moving when networks go down.**
