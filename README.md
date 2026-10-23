@@ -1,6 +1,6 @@
 # ReachOut
 
-**Offline Messaging Through Bluetooth Mesh Networking**
+**Offline Messaging over Bluetooth Low Energy and Deplay-Tolerant Networking**
 
 ReachOut is a Flutter-based mobile application designed to help people communicate when traditional communication infrastructure, such as cellular networks and internet connectivity, is unavailable or unreliable.
 
